@@ -3,6 +3,7 @@ import Fuse from 'fuse.js';
 import { Search, X } from 'lucide-react';
 import AppSwitcher from './AppSwitcher';
 import docs from "../search.json";
+import Features from './Features';
 
 interface Doc {
   title: string;
@@ -82,13 +83,13 @@ function App() {
               Documentation
               <span className={`block h-1 ml-4 mr-4 ${isDocumentationSelected ? 'bg-green-500' : 'bg-transparent'} absolute bottom-0 left-0 right-0`}></span>
             </button>
-            {/*<button
+            <button
               className="relative px-4 py-2 text-gray-500"
               onClick={() => setIsDocumentationSelected(false)}
             >
               Features
               <span className={`block h-1 ml-4 mr-4 ${!isDocumentationSelected ? 'bg-green-500' : 'bg-transparent'} absolute bottom-0 left-0 right-0`}></span>
-            </button>*/}
+            </button>
           </div>
         </div>
 
@@ -114,7 +115,7 @@ function App() {
           </div>
           </>
         ) : (
-          <h1>Feature List</h1> 
+          <Features/> 
         )}
 
         {/* Modal */}
