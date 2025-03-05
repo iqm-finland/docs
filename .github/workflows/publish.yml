@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'docs/**'
   schedule:
     - cron: "0 0 * * *"
 
@@ -19,12 +21,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
+        working-directory: ./docs
         run: |
           pip install -r requirements.txt
           apt-get update
           apt-get install -y graphviz
 
       - name: Build sphinx documentation
+        working-directory: ./docs
         run: |
           mkdir -p public
           mkdir -p temp
@@ -55,33 +59,40 @@ jobs:
           touch public/.nojekyll
 
       - name: Generate search index
+        working-directory: ./docs
         run: python generate_search_index.py
 
       - name: Ensure search index is in public folder
+        working-directory: ./docs
         run: |
           cp search.json public/ || echo "No search index found"
 
       - name: Install Node.js
+        working-directory: ./docs
         uses: actions/setup-node@v4
         with:
           node-version: 18
 
       - name: Install and build React project
+        working-directory: ./docs
         run: |
           npm ci
           npm run build
 
       - name: Copy React build to public folder
+        working-directory: ./docs
         run: |
           mkdir -p public
           cp -r dist/* public/
           cp src/favicon.ico public/favicon.ico
 
       - name: Install rsync
+        working-directory: ./docs
         run: |
           apt-get update && apt-get install -y rsync
 
       - name: Publish to gh-pages
+        working-directory: ./docs
         uses: JamesIves/github-pages-deploy-action@v4
         with:
           folder: public
