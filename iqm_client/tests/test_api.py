@@ -12,12 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Tests for the IQM client API."""
+
+from iqm.iqm_client.api import APIConfig, APIEndpoint, APIVariant
+from iqm.iqm_client.iqm_client import IQMClient
 from mockito import ANY, when
 import pytest
 import requests
 
-from iqm.iqm_client.api import APIConfig, APIEndpoint, APIVariant
-from iqm.iqm_client.iqm_client import IQMClient
 from tests.conftest import mock_supported_client_libraries_response
 
 

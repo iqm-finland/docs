@@ -42,6 +42,7 @@ class APIEndpoint(Enum):
     QUANTUM_ARCHITECTURE = auto()
     CHANNEL_PROPERTIES = auto()
     QUALITY_METRICS_LATEST = auto()
+    QUALITY_METRICS = auto()
     QUALITY_METRICS_MONITORING = auto()
     CALIBRATED_GATES = auto()
     START_CALIBRATION_JOB = auto()
@@ -51,9 +52,7 @@ class APIEndpoint(Enum):
 
 
 class APIVariant(Enum):
-    """
-    Supported API versions and variants.
-    """
+    """Supported API versions and variants."""
 
     V1 = "V1"  # QCCSW Cocos-based circuits execution
     V2 = "V2"  # Station-Control-based circuits execution
@@ -64,12 +63,12 @@ class APIConfig:
     """Provides supported API endpoints for a given API variant."""
 
     def __init__(self, variant: APIVariant, iqm_server_url: str):
-        """
-        Args:
-            variant: API variant.
-            iqm_server_url: URL of the IQM server,
-                            e.g. https://test.qc.iqm.fi/cocos or https://cocos.resonance.meetiqm.com/garnet for .V1
-                            or https://test.qc.iqm.fi for .V2
+        """Args:
+        variant: API variant.
+        iqm_server_url: URL of the IQM server,
+                        e.g. https://test.qc.iqm.fi/cocos or https://cocos.resonance.meetiqm.com/garnet for .V1
+                        or https://test.qc.iqm.fi for .V2
+
         """
         self.variant = variant
 
@@ -85,9 +84,9 @@ class APIConfig:
         self.urls = self._get_api_urls()
 
     def _get_api_urls(self) -> dict[APIEndpoint, str]:
-        """
-        Returns:
-            Relative URLs for each supported API endpoints.
+        """Returns:
+        Relative URLs for each supported API endpoints.
+
         """
         if self.variant == APIVariant.RESONANCE_COCOS_V1:
             return {
@@ -104,6 +103,7 @@ class APIConfig:
             return {
                 APIEndpoint.CONFIGURATION: "configuration",
                 APIEndpoint.QUALITY_METRICS_LATEST: "calibration/metrics/latest",
+                APIEndpoint.QUALITY_METRICS: "calibration/metrics/%s",
                 APIEndpoint.SUBMIT_JOB: "jobs",
                 APIEndpoint.GET_JOB_RESULT: "jobs/%s",
                 APIEndpoint.GET_JOB_STATUS: "jobs/%s/status",
@@ -127,6 +127,7 @@ class APIConfig:
                 APIEndpoint.GET_JOB_REQUEST_PARAMETERS: "station/circuits/%s/request_parameters",
                 APIEndpoint.CONFIGURATION: "cocos/configuration",
                 APIEndpoint.QUALITY_METRICS_LATEST: "cocos/calibration/metrics/latest",
+                APIEndpoint.QUALITY_METRICS: "cocos/calibration/metrics/%s",
                 APIEndpoint.SUBMIT_JOB: "station/circuits",
                 APIEndpoint.GET_JOB_RESULT: "station/circuits/%s/measurements",
                 APIEndpoint.GET_JOB_STATUS: "station/circuits/%s/status",
@@ -153,18 +154,17 @@ class APIConfig:
         raise ValueError(f"Unsupported API variant: {self.variant}")
 
     def is_supported(self, endpoint: APIEndpoint) -> bool:
-        """
-        Args:
+        """Args:
             endpoint: API endpoint.
 
         Returns:
             True if the endpoint is supported, False otherwise.
+
         """
         return endpoint in self.urls
 
     def url(self, endpoint: APIEndpoint, *args) -> str:
-        """
-        Args:
+        """Args:
             endpoint: API endpoint.
             args: Arguments to be passed to the URL.
 
@@ -173,6 +173,7 @@ class APIConfig:
 
         Raises:
             ValueError: If the endpoint is not supported.
+
         """
         url = self.urls.get(endpoint)
         if url is None:

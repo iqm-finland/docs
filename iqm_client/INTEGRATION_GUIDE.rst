@@ -136,7 +136,7 @@ IQM Crystal quantum architectures.
 
 The notable exception is the transpilation for the IQM Star quantum architectures, which have
 computational resonators in addition to qubits. Some specialized transpilation logic involving
-the MOVE gates specific to these architectures is provided, in the form of the fuctions
+the MOVE gates specific to these architectures is provided, in the form of the functions
 :func:`.transpile_insert_moves` and :func:`.transpile_remove_moves`.
 See :mod:`iqm.iqm_client.transpile` for the details.
 

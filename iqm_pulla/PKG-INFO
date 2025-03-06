@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: iqm-pulla
-Version: 6.4
+Version: 6.5
 Summary: Client library for pulse-level access to an IQM quantum computer
 Author-email: IQM Finland Oy <developers@meetiqm.com>
 License:                                  Apache License
@@ -238,6 +238,7 @@ Provides-Extra: qiskit
 Requires-Dist: iqm-exa-common<27,>=26; extra == "qiskit"
 Requires-Dist: iqm-station-control-client<4,>=3; extra == "qiskit"
 Requires-Dist: iqm-pulse<9,>=8; extra == "qiskit"
+Requires-Dist: iqm-client<23,>=22; extra == "qiskit"
 Requires-Dist: qiskit-iqm<18,>=17.3; extra == "qiskit"
 
 IQM Pulla

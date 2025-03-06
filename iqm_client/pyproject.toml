@@ -1,151 +1,72 @@
+# This file is managed by monotool.py, do not edit by hand
 [build-system]
-requires = [
-    # NOTE: including build deps in the lockfile not yet directly by uv. Working around this by duplicating build deps
-    #       in project dependencies doesn't work either since using them via the lockfile requires
-    #       `--no-build-isolation` while installing, which itself requires setuptools.
-    #       See https://github.com/astral-sh/uv/issues/5190.
-    "setuptools>=65.4.1",
-    "setuptools_scm[toml]>=7",
-]
 build-backend = "setuptools.build_meta"
+requires = [ "setuptools", "setuptools_scm[toml]",]
 
 [project]
-name = "iqm-client"
-dynamic = ["version"]
+classifiers = [ "Development Status :: 4 - Beta", "Programming Language :: Python :: 3 :: Only", "Topic :: Scientific/Engineering :: Physics", "Intended Audience :: Science/Research", "License :: OSI Approved :: Apache Software License",]
 description = "Client library for accessing an IQM quantum computer"
-authors = [{name="IQM Finland Oy", email="developers@meetiqm.com"}]
+dynamic = [ "version", "dependencies",]
+name = "iqm-client"
 readme = "README.rst"
-license = {file="LICENSE.txt"}
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Programming Language :: Python :: 3 :: Only",
-    "Topic :: Scientific/Engineering :: Physics",
-    "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: Apache Software License",
-]
-requires-python = ">=3.10, <3.13"
-dependencies = [
-    "numpy < 3.0",
-    "packaging >= 24.1, < 25.0",
-    "requests >= 2.28.2, < 3.0",
-    "pydantic >= 2.4.2, < 3.0",
-]
+requires-python = ">=3.11, <3.13"
+[[project.authors]]
+name = "IQM Finland Oy"
+email = "developers@meetiqm.com"
+
+[project.license]
+file = "LICENSE.txt"
 
 [project.urls]
-Homepage = "https://github.com/iqm-finland/iqm-client"
-Documentation = "https://iqm-finland.github.io/iqm-client"
+Documentation = "https://docs.meetiqm.com/iqm-client/"
+Homepage = "https://pypi.org/project/iqm-client/"
 
-[project.optional-dependencies]
-testing = [
-    "black == 24.10.0",
-    "isort == 5.13.2",
-    "pylint == 3.3.3",
-    "mypy == 1.14.1",
-    "mockito == 1.4.0",
-    "pytest == 8.3.4",
-    "pytest-cov == 6.0.0",
-    "pytest-isort == 4.0.0",
-    "pytest-pylint == 0.21.0",
-    "pylint-pydantic == 0.3.5",
-    "types-requests == 2.28.9",
-    "jsons == 1.6.1",
-    "freezegun == 1.5.1",
-]
-docs = [
-    "sphinx == 7.2.6",
-    "sphinx-book-theme == 1.1.2",
-]
-cicd = [
-    "build == 1.0.3",
-    "pip-licenses == 5.0.0",
-]
-
+[tool.ruff]
+exclude = [ "*.ipynb", "*.rst",]
+extend-include = [ "sub-setup-py.template",]
+line-length = 120
 
 [tool.setuptools_scm]
-# See configuration details in https://github.com/pypa/setuptools_scm
-version_scheme = "no-guess-dev"
+fallback_version = "0.1"
 
+[tool.coverage.paths]
+source = [ "src/", "*/site-packages/",]
 
-[tool.black]
-line-length = 120
-skip-string-normalization = true
-target-version = ["py311"]
-extend-exclude = "_pb2.py$"
-
+[tool.coverage.report]
+exclude_lines = [ "pragma: no cover", "def __repr__", "if self\\.debug", "raise AssertionError", "raise NotImplementedError", "if 0:", "if __name__ == .__main__.:",]
 
 [tool.coverage.run]
 branch = true
-source = ["iqm"]
+source = [ "iqm",]
 
-[tool.coverage.paths]
-source = [
-    "src/",
-    "*/site-packages/",
-]
+[tool.pytest.ini_options]
+nb_diff_ignore = [ "/metadata/language_info", "/metadata/widgets", "/cells/*/execution_count", "/cells/*/outputs",]
 
-[tool.coverage.report]
-# Regexes for lines to exclude from consideration
-exclude_lines = [
-    # Have to re-enable the standard pragma
-    "pragma: no cover",
+[tool.ruff.lint]
+ignore = [ "D203", "D213",]
+select = [ "E4", "E7", "E9", "E5", "F", "Q", "PL", "I", "D",]
+unfixable = [ "F401",]
 
-    # Don't complain about missing debug-only code:
-    "def __repr__",
-    'if self\.debug',
+[tool.ruff.lint.isort]
+force-sort-within-sections = true
+known-first-party = [ "exa.experiments", "exa.core", "exa.common", "cocos", "gbc", "calibration_graphs", "iqm.pulse", "iqm.cpc", "iqm.pulla", "iqm.station_control", "tests",]
+known-local-folder = [ "src",]
+known-third-party = [ "exa", "iqm",]
+relative-imports-order = "closest-to-furthest"
 
-    # Don't complain if tests don't hit defensive assertion code:
-    "raise AssertionError",
-    "raise NotImplementedError",
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = [ "F401", "PLR0402",]
+"**/docs/*" = [ "E402", "D100",]
+"**/setup.py" = [ "D100", "D103", "I001",]
+"**/src/*" = [ "PLR2004", "D400", "D415", "D205", "D401", "D417", "D100", "D101", "D107", "D102", "D105", "D103", "D404", "D104",]
+"**/tests/*" = [ "F632", "PLR2004", "PLR0402", "PLC0414", "D",]
 
-    # Don't complain if non-runnable code isn't run:
-    "if 0:",
-    "if __name__ == .__main__.:",
-]
+[tool.ruff.lint.pylint]
+max-args = 8
+max-branches = 16
+max-locals = 21
+max-returns = 9
+max-statements = 60
 
-
-[tool.isort]
-# make isort and black compatible
-profile = "black"
-line_length = 120
-balanced_wrapping = true
-force_sort_within_sections = true
-reverse_relative = true
-group_by_package = true
-known_first_party = ["iqm"]
-
-
-[tool.mypy]
-ignore_missing_imports = true
-namespace_packages = true
-explicit_package_bases = true
-mypy_path = "src"
-plugins = ["pydantic.mypy"]
-
-[[tool.mypy.overrides]]
-module = ["requests"]
-ignore_missing_imports = true
-
-
-[tool.pylint.main]
-disable = [
-    "protected-access",
-    "too-few-public-methods",
-    "too-many-arguments",
-    "invalid-name",
-    "abstract-method",
-    "fixme",
-]
-load-plugins = ["pylint_pydantic"]
-extension-pkg-whitelist = ["pydantic"]
-
-[tool.pylint.format]
-# Maximum number of characters on a single line.
-max-line-length = 120
-
-[tool.pylint.similarities]
-ignore-imports = true
-
-[tool.pylint.string]
-# This flag controls whether inconsistent-quotes generates a warning when the
-# character used as a quote delimiter is used inconsistently within a module.
-check-quote-consistency = true
+[tool.setuptools.dynamic.dependencies]
+file = "requirements/base.txt"
