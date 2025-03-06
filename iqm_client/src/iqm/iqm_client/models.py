@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """This module contains the data models used by IQMClient."""
-# pylint: disable=too-many-lines, no-member
-# no-member: see https://github.com/pylint-dev/pylint/issues/8759
 
 from __future__ import annotations
 
@@ -21,7 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
 import re
-from typing import Any, Optional, Union
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field, StrictStr, field_validator
@@ -31,8 +29,6 @@ from pydantic_core.core_schema import ValidationInfo
 @dataclass(frozen=True)
 class NativeOperation:
     """Describes a native operation on the quantum computer."""
-
-    # pylint: disable=too-many-instance-attributes
 
     name: str
     """Name of the operation."""
@@ -46,7 +42,7 @@ class NativeOperation:
     symmetric: bool = False
     """True iff the effect of operation is symmetric in the locus components it acts on.
     Only meaningful if :attr:`arity` != 1."""
-    renamed_to: str = ''
+    renamed_to: str = ""
     """If nonempty, indicates that this operation name is deprecated, and IQM client will
     auto-rename it to the new name."""
     factorizable: bool = False
@@ -60,31 +56,31 @@ class NativeOperation:
 _SUPPORTED_OPERATIONS: dict[str, NativeOperation] = {
     op.name: op
     for op in [
-        NativeOperation('barrier', 0, symmetric=True, no_calibration_needed=True),
-        NativeOperation('delay', 0, {'duration': (float,)}, symmetric=True, no_calibration_needed=True),
-        NativeOperation('measure', 0, {'key': (str,)}, args_not_required={'feedback_key': (str,)}, factorizable=True),
+        NativeOperation("barrier", 0, symmetric=True, no_calibration_needed=True),
+        NativeOperation("delay", 0, {"duration": (float,)}, symmetric=True, no_calibration_needed=True),
+        NativeOperation("measure", 0, {"key": (str,)}, args_not_required={"feedback_key": (str,)}, factorizable=True),
         NativeOperation(
-            'prx',
+            "prx",
             1,
             {
-                'angle_t': (float, int),
-                'phase_t': (float, int),
+                "angle_t": (float, int),
+                "phase_t": (float, int),
             },
         ),
         NativeOperation(
-            'cc_prx',
+            "cc_prx",
             1,
             {
-                'angle_t': (float, int),
-                'phase_t': (float, int),
-                'feedback_key': (str,),
-                'feedback_qubit': (str,),
+                "angle_t": (float, int),
+                "phase_t": (float, int),
+                "feedback_key": (str,),
+                "feedback_qubit": (str,),
             },
         ),
         # TODO reset does need calibration, but it inherits it from cc_prx and does not yet appear in the DQA itself.
-        NativeOperation('reset', 0, symmetric=True, factorizable=True, no_calibration_needed=True),
-        NativeOperation('cz', 2, symmetric=True),
-        NativeOperation('move', 2),
+        NativeOperation("reset", 0, symmetric=True, factorizable=True, no_calibration_needed=True),
+        NativeOperation("cz", 2, symmetric=True),
+        NativeOperation("move", 2),
     ]
 }
 
@@ -276,13 +272,13 @@ class Instruction(BaseModel):
        hardware granularity, even though only 1 ns was requested for `alice`.
     """
 
-    name: str = Field(..., examples=['measure'])
+    name: str = Field(..., examples=["measure"])
     """name of the quantum operation"""
-    implementation: Optional[StrictStr] = Field(None)
+    implementation: StrictStr | None = Field(None)
     """name of the implementation, for experimental use only"""
-    qubits: Locus = Field(..., examples=[('alice',)])
+    qubits: Locus = Field(..., examples=[("alice",)])
     """names of the locus components (typically qubits) the operation acts on"""
-    args: dict[str, Any] = Field(..., examples=[{'key': 'm'}])
+    args: dict[str, Any] = Field(..., examples=[{"key": "m"}])
     """arguments for the operation"""
 
     def __init__(self, **data):
@@ -290,47 +286,47 @@ class Instruction(BaseModel):
         # Auto-convert name if a deprecated name is used
         self.name = _op_current_name(self.name)
 
-    @field_validator('name')
+    @field_validator("name")
     @classmethod
     def name_validator(cls, value):
         """Check if the name of instruction is set to one of the supported quantum operations."""
         name = value
         if name not in _SUPPORTED_OPERATIONS:
-            message = ', '.join(_SUPPORTED_OPERATIONS)
+            message = ", ".join(_SUPPORTED_OPERATIONS)
             raise ValueError(f'Unknown operation "{name}". Supported operations are "{message}"')
         return name
 
-    @field_validator('implementation')
+    @field_validator("implementation")
     @classmethod
     def implementation_validator(cls, value):
         """Check if the implementation of the instruction is set to a non-empty string."""
         implementation = value
         if isinstance(implementation, str):
             if not implementation:
-                raise ValueError('Implementation of the instruction should be None, or a non-empty string')
+                raise ValueError("Implementation of the instruction should be None, or a non-empty string")
         return implementation
 
-    @field_validator('qubits')
+    @field_validator("qubits")
     @classmethod
     def qubits_validator(cls, value, info: ValidationInfo):
         """Check if the instruction has the correct number of qubits for its operation."""
         qubits = value
-        name = info.data.get('name')
+        name = info.data.get("name")
         if not name:
-            raise ValueError('Could not validate qubits because the name of the instruction did not pass validation')
+            raise ValueError("Could not validate qubits because the name of the instruction did not pass validation")
         arity = _SUPPORTED_OPERATIONS[name].arity
         if (0 < arity) and (arity != len(qubits)):
             raise ValueError(f'The "{name}" operation acts on {arity} qubit(s), but {len(qubits)} were given: {qubits}')
         return qubits
 
-    @field_validator('args')
+    @field_validator("args")
     @classmethod
     def args_validator(cls, value, info: ValidationInfo):
         """Check argument names and types for a given instruction"""
         args = value
-        name = info.data.get('name')
+        name = info.data.get("name")
         if not name:
-            raise ValueError('Could not validate args because the name of the instruction did not pass validation')
+            raise ValueError("Could not validate args because the name of the instruction did not pass validation")
 
         # Check argument names
         submitted_arg_names = set(args)
@@ -340,15 +336,13 @@ class Instruction(BaseModel):
         if not required_arg_names <= submitted_arg_names:
             raise ValueError(
                 f'The operation "{name}" requires '
-                f'{tuple(required_arg_names)} argument(s), '
-                f'but {tuple(submitted_arg_names)} were given'
+                f"{tuple(required_arg_names)} argument(s), "
+                f"but {tuple(submitted_arg_names)} were given"
             )
         if not submitted_arg_names <= allowed_arg_names:
-            message = tuple(allowed_arg_names) if allowed_arg_names else 'no'
+            message = tuple(allowed_arg_names) if allowed_arg_names else "no"
             raise ValueError(
-                f'The operation "{name}" allows '
-                f'{message} argument(s), '
-                f'but {tuple(submitted_arg_names)} were given'
+                f'The operation "{name}" allows {message} argument(s), but {tuple(submitted_arg_names)} were given'
             )
 
         # Check argument types
@@ -357,7 +351,7 @@ class Instruction(BaseModel):
             if not isinstance(arg_value, allowed_types):
                 raise TypeError(
                     f'The argument "{arg_name}" should be of one of the following supported types'
-                    f' {allowed_types}, but ({type(arg_value)}) was given'
+                    f" {allowed_types}, but ({type(arg_value)}) was given"
                 )
 
         return value
@@ -373,6 +367,7 @@ def _op_is_symmetric(name: str) -> bool:
         True iff the locus order does not matter
     Raises:
         KeyError: ``name`` is unknown
+
     """
     return _SUPPORTED_OPERATIONS[name].symmetric
 
@@ -388,6 +383,7 @@ def _op_arity(name: str) -> int:
         arity of the operation
     Raises:
         KeyError: ``name`` is unknown
+
     """
     return _SUPPORTED_OPERATIONS[name].arity
 
@@ -403,6 +399,7 @@ def _op_current_name(name: str) -> str:
         current name of the operation
     Raises:
         KeyError: ``name`` is unknown
+
     """
     return _SUPPORTED_OPERATIONS[name].renamed_to or name
 
@@ -413,11 +410,11 @@ class Circuit(BaseModel):
     Consists of native quantum operations, each represented by an instance of the :class:`Instruction` class.
     """
 
-    name: str = Field(..., examples=['test circuit'])
+    name: str = Field(..., examples=["test circuit"])
     """name of the circuit"""
     instructions: tuple[Instruction, ...] = Field(...)
     """instructions comprising the circuit"""
-    metadata: Optional[dict[str, Any]] = Field(None)
+    metadata: dict[str, Any] | None = Field(None)
     """arbitrary metadata associated with the circuit"""
 
     def all_qubits(self) -> set[str]:
@@ -427,16 +424,16 @@ class Circuit(BaseModel):
             qubits.update(instruction.qubits)
         return qubits
 
-    @field_validator('name')
+    @field_validator("name")
     @classmethod
     def name_validator(cls, value):
         """Check if the circuit name is a non-empty string"""
         name = value
         if len(name) == 0:
-            raise ValueError('A circuit should have a non-empty string for a name.')
+            raise ValueError("A circuit should have a non-empty string for a name.")
         return name
 
-    @field_validator('instructions')
+    @field_validator("instructions")
     @classmethod
     def instructions_validator(cls, value):
         """Check the container of instructions and each instruction within"""
@@ -444,11 +441,11 @@ class Circuit(BaseModel):
 
         # Check container type
         if not isinstance(instructions, (list, tuple)):
-            raise ValueError('Instructions of a circuit should be packed in a tuple')
+            raise ValueError("Instructions of a circuit should be packed in a tuple")
 
         # Check if any instructions are present
         if len(value) == 0:
-            raise ValueError('Each circuit should have at least one instruction.')
+            raise ValueError("Each circuit should have at least one instruction.")
 
         # Check each instruction explicitly, because automatic validation for Instruction
         # is only called when we create a new instance of Instruction, but not if we modify
@@ -457,7 +454,7 @@ class Circuit(BaseModel):
             if isinstance(instruction, Instruction):
                 Instruction.model_validate(instruction.__dict__)
             else:
-                raise ValueError('Every instruction in a circuit should be of type <Instruction>')
+                raise ValueError("Every instruction in a circuit should be of type <Instruction>")
 
         return instructions
 
@@ -474,6 +471,7 @@ def validate_circuit(circuit: Circuit) -> None:
 
     Raises:
         pydantic.error_wrappers.ValidationError: validation failed
+
     """
     Circuit.model_validate(circuit.__dict__)
 
@@ -481,9 +479,9 @@ def validate_circuit(circuit: Circuit) -> None:
 class SingleQubitMapping(BaseModel):
     """Mapping of a logical qubit name to a physical qubit name."""
 
-    logical_name: str = Field(..., examples=['alice'])
+    logical_name: str = Field(..., examples=["alice"])
     """logical qubit name"""
-    physical_name: str = Field(..., examples=['QB1'])
+    physical_name: str = Field(..., examples=["QB1"])
     """physical qubit name"""
 
 
@@ -500,6 +498,7 @@ def serialize_qubit_mapping(qubit_mapping: dict[str, str]) -> list[SingleQubitMa
 
     Returns:
         data transfer object representing the mapping
+
     """
     return [SingleQubitMapping(logical_name=k, physical_name=v) for k, v in qubit_mapping.items()]
 
@@ -517,13 +516,13 @@ class QuantumArchitectureSpecification(BaseModel):
     """Qubit connectivity of this quantum architecture."""
 
     def __init__(self, **data):
-        operations = data.get('operations')
+        operations = data.get("operations")
         if isinstance(operations, list):
             # backwards compatibility for the old quantum architecture format
-            qubits = data.get('qubits')
-            qubit_connectivity = data.get('qubit_connectivity')
+            qubits = data.get("qubits")
+            qubit_connectivity = data.get("qubit_connectivity")
             # add all possible loci for the ops
-            data['operations'] = {
+            data["operations"] = {
                 _op_current_name(op): (
                     qubit_connectivity if _op_arity(_op_current_name(op)) == 2 else [[qb] for qb in qubits]
                 )
@@ -539,6 +538,7 @@ class QuantumArchitectureSpecification(BaseModel):
 
         Returns:
             True if the operation and the loci are equivalent.
+
         """
         return QuantumArchitectureSpecification.compare_operations(self.operations, other.operations)
 
@@ -548,6 +548,7 @@ class QuantumArchitectureSpecification(BaseModel):
 
         Returns:
             True if the operation and the loci are equivalent.
+
         """
         if set(ops1) != set(ops2):
             return False
@@ -575,10 +576,56 @@ class QuantumArchitecture(BaseModel):
 
 def _component_sort_key(component_name: str) -> tuple[str, int, str]:
     def get_numeric_id(name: str) -> int:
-        match = re.search(r'(\d+)', name)
+        match = re.search(r"(\d+)", name)
         return int(match.group(1)) if match else 0
 
-    return re.sub(r'[^a-zA-Z]', '', component_name), get_numeric_id(component_name), component_name
+    return re.sub(r"[^a-zA-Z]", "", component_name), get_numeric_id(component_name), component_name
+
+
+class QualityMetricSet(BaseModel):
+    """Quality metrics for a calibration set."""
+
+    calibration_set_id: UUID | None = Field(...)
+    """ID of the calibration set."""
+    calibration_set_dut_label: str = Field(...)
+    """Chip Label of the calibration set."""
+    calibration_set_number_of_observations: int = Field(...)
+    """Number of observations in the calibration set."""
+    calibration_set_created_timestamp: str = Field(...)
+    """Timestamp when the calibration set was created."""
+    calibration_set_end_timestamp: str = Field(...)
+    """Timestamp when the calibration set was finalized."""
+    calibration_set_is_invalid: bool = Field(...)
+    """Whether the calibration set is invalid."""
+    quality_metric_set_id: UUID | None = Field(...)
+    """ID of the quality metric set."""
+    quality_metric_set_dut_label: str | None = Field(...)
+    """Chip label of the quality metric set."""
+    quality_metric_set_created_timestamp: str | None = Field(...)
+    """Timestamp when the quality metric set was created."""
+    quality_metric_set_end_timestamp: str | None = Field(...)
+    """Timestamp when the quality metric set was finalized."""
+    quality_metric_set_is_invalid: bool = Field(...)
+    """Whether the quality metric set is invalid."""
+    metrics: dict[str, dict[str, Any]] | None = Field(...)
+    """Quality metrics."""
+
+
+class CalibrationSet(BaseModel):
+    """Metadata and observations of a calibration set."""
+
+    calibration_set_id: UUID = Field(...)
+    """ID of the calibration set."""
+    calibration_set_dut_label: str = Field(...)
+    """Chip Label of the calibration set."""
+    calibration_set_is_invalid: bool = Field(...)
+    """Whether the calibration set is invalid."""
+    calibration_set_created_timestamp: str = Field(...)
+    """Timestamp when the calibration set was created."""
+    calibration_set_end_timestamp: str = Field(...)
+    """Timestamp when the calibration set was finalized."""
+    observations: dict[str, Any] = Field(...)
+    """Calibration data."""
 
 
 class GateImplementationInfo(BaseModel):
@@ -600,7 +647,7 @@ class GateInfo(BaseModel):
     override_default_implementation: dict[Locus, str] = Field(...)
     """mapping of loci to implementation names that override ``default_implementation`` for those loci"""
 
-    @field_validator('override_default_implementation', mode='before')
+    @field_validator("override_default_implementation", mode="before")
     @classmethod
     def override_default_implementation_validator(cls, value: Any) -> dict[Locus, str]:
         """Converts locus keys to tuples if they are encoded as strings."""
@@ -613,7 +660,7 @@ class GateInfo(BaseModel):
                 # comma-separated strings (because JSON only supports string keys). Here we convert
                 # them back into tuples.
                 elif isinstance(k, str):
-                    new_k = tuple(k.split(','))
+                    new_k = tuple(k.split(","))
                     new_value[new_k] = v
                 else:
                     raise ValueError("'override_default_implementation' keys must be strings or tuples.")
@@ -638,7 +685,7 @@ class GateInfo(BaseModel):
             ('QB10', 'QB2'),
 
         """
-        loci_set = set(locus for impl in self.implementations.values() for locus in impl.loci)
+        loci_set = {locus for impl in self.implementations.values() for locus in impl.loci}
         loci_sorted = sorted(loci_set, key=lambda locus: tuple(map(_component_sort_key, locus)))
         return tuple(loci_sorted)
 
@@ -674,11 +721,12 @@ class HeraldingMode(str, Enum):
     """Heralding mode for circuit execution.
 
     Heralding is the practice of generating data about the state of qubits prior to execution of a circuit.
-    This can be achieved by measuring the qubits immediately before executing each shot for a circuit."""
+    This can be achieved by measuring the qubits immediately before executing each shot for a circuit.
+    """
 
-    NONE = 'none'
+    NONE = "none"
     """Do not do any heralding."""
-    ZEROS = 'zeros'
+    ZEROS = "zeros"
     """Perform a heralding measurement after qubit initialization, only retain shots with an all-zeros result.
 
     Note: in this mode, the number of shots returned after execution will be less or equal to the requested amount
@@ -688,33 +736,33 @@ class HeraldingMode(str, Enum):
 class MoveGateValidationMode(str, Enum):
     """MOVE gate validation mode for circuit compilation. This options is meant for advanced users."""
 
-    STRICT = 'strict'
+    STRICT = "strict"
     """Perform standard MOVE gate validation: MOVE gates must only appear in sandwiches, with no gates acting on the
     MOVE qubit inside the sandwich."""
-    ALLOW_PRX = 'allow_prx'
+    ALLOW_PRX = "allow_prx"
     """Allow PRX gates on the MOVE qubit inside MOVE sandwiches during validation."""
-    NONE = 'none'
+    NONE = "none"
     """Do not perform any MOVE gate validation."""
 
 
 class MoveGateFrameTrackingMode(str, Enum):
     """MOVE gate frame tracking mode for circuit compilation. This option is meant for advanced users."""
 
-    FULL = 'full'
+    FULL = "full"
     """Perform complete MOVE gate frame tracking."""
-    NO_DETUNING_CORRECTION = 'no_detuning_correction'
+    NO_DETUNING_CORRECTION = "no_detuning_correction"
     """Do not add the phase detuning corrections to the pulse schedule for the MOVE gate. The user is expected to do
     these manually."""
-    NONE = 'none'
+    NONE = "none"
     """Do not perform any MOVE gate frame tracking. The user is expected to do these manually."""
 
 
 class DDMode(str, Enum):
     """Dynamical Decoupling (DD) mode for circuit execution."""
 
-    DISABLED = 'disabled'
+    DISABLED = "disabled"
     """Do not apply dynamical decoupling."""
-    ENABLED = 'enabled'
+    ENABLED = "enabled"
     """Apply dynamical decoupling."""
 
 
@@ -735,7 +783,7 @@ class DDStrategy(BaseModel):
     merge_contiguous_waits: bool = Field(True)
     """Merge contiguous ``Wait`` instructions into one if they are separated only by ``Block`` instructions."""
 
-    target_qubits: Optional[frozenset[str]] = Field(None)
+    target_qubits: frozenset[str] | None = Field(None)
     """Qubits on which dynamical decoupling should be applied. If ``None``, all qubits are targeted."""
 
     skip_leading_wait: bool = Field(True)
@@ -744,7 +792,7 @@ class DDStrategy(BaseModel):
     skip_trailing_wait: bool = Field(True)
     """Skip processing trailing ``Wait`` instructions."""
 
-    gate_sequences: list[tuple[int, Union[str, PRXSequence], str]] = Field(default_factory=list)
+    gate_sequences: list[tuple[int, str | PRXSequence, str]] = Field(default_factory=list)
     """Available decoupling gate sequences to chose from in this strategy.
 
     Each sequence is defined by a tuple of ``(ratio, gate pattern, align)``:
@@ -769,7 +817,7 @@ class DDStrategy(BaseModel):
     """
 
 
-STANDARD_DD_STRATEGY = DDStrategy(gate_sequences=[(9, 'XYXYYXYX', 'asap'), (5, 'YXYX', 'asap'), (2, 'XX', 'center')])
+STANDARD_DD_STRATEGY = DDStrategy(gate_sequences=[(9, "XYXYYXYX", "asap"), (5, "YXYX", "asap"), (2, "XX", "center")])
 """The default DD strategy uses the following gate sequences:
 
 * Simple symmetric CPMG sequence for short idling times.
@@ -782,7 +830,7 @@ STANDARD_DD_STRATEGY = DDStrategy(gate_sequences=[(9, 'XYXYYXYX', 'asap'), (5, '
 class CircuitCompilationOptions:
     """Various discrete options for quantum circuit compilation to pulse schedule."""
 
-    max_circuit_duration_over_t2: Optional[float] = None
+    max_circuit_duration_over_t2: float | None = None
     """Server-side circuit disqualification threshold.
     The job is rejected on the server if any circuit in it is estimated to take longer than
     the shortest T2 time of any qubit used in the circuit, multiplied by this value.
@@ -796,14 +844,14 @@ class CircuitCompilationOptions:
     move_gate_frame_tracking: MoveGateFrameTrackingMode = MoveGateFrameTrackingMode.FULL
     """MOVE gate frame tracking mode for circuit compilation. This options is ignored on devices that do not support
         MOVE and for circuits that do not contain MOVE gates."""
-    active_reset_cycles: Optional[int] = None
+    active_reset_cycles: int | None = None
     """Number of active ``reset`` operations inserted at the beginning of each circuit for each active qubit.
     ``None`` means active reset is not used but instead reset is done by waiting (relaxation). Integer values smaller
     than 1 result in neither active nor reset by wait being used, in which case any reset operations must be explicitly
     added in the circuit."""
     dd_mode: DDMode = DDMode.DISABLED
     """Control whether dynamical decoupling should be enabled or disabled during the execution."""
-    dd_strategy: Optional[DDStrategy] = None
+    dd_strategy: DDStrategy | None = None
     """A particular dynamical decoupling strategy to be used during the execution."""
 
     def __post_init__(self):
@@ -814,7 +862,7 @@ class CircuitCompilationOptions:
             None,
         ]:
             raise ValueError(
-                'Unable to perform full MOVE gate frame tracking if MOVE gate validation is not'
+                "Unable to perform full MOVE gate frame tracking if MOVE gate validation is not"
                 + ' "strict" or "allow_prx".'
             )
 
@@ -827,16 +875,16 @@ class RunRequest(BaseModel):
 
     circuits: CircuitBatch = Field(...)
     """batch of quantum circuit(s) to execute"""
-    custom_settings: Optional[dict[str, Any]] = Field(None)
+    custom_settings: dict[str, Any] | None = Field(None)
     """Custom settings to override default IQM hardware settings and calibration data.
     Note: This field should be always None in normal use."""
-    calibration_set_id: Optional[UUID] = Field(None)
+    calibration_set_id: UUID | None = Field(None)
     """ID of the calibration set to use, or None to use the latest calibration set"""
-    qubit_mapping: Optional[list[SingleQubitMapping]] = Field(None)
+    qubit_mapping: list[SingleQubitMapping] | None = Field(None)
     """mapping of logical qubit names to physical qubit names, or None if using physical qubit names"""
     shots: int = Field(..., gt=0)
     """how many times to execute each circuit in the batch, must be greater than zero"""
-    max_circuit_duration_over_t2: Optional[float] = Field(None)
+    max_circuit_duration_over_t2: float | None = Field(None)
     """Circuits are disqualified on the server if they are longer than this ratio
         of the T2 time of the qubits.
         If set to 0.0, no circuits are disqualified. If set to None the server default value is used."""
@@ -847,14 +895,14 @@ class RunRequest(BaseModel):
     """Which method of MOVE gate validation to use for circuit compilation."""
     move_gate_frame_tracking_mode: MoveGateFrameTrackingMode = Field(MoveGateFrameTrackingMode.FULL)
     """Which method of MOVE gate frame tracking to use for circuit compilation."""
-    active_reset_cycles: Optional[int] = Field(None)
+    active_reset_cycles: int | None = Field(None)
     """Number of active ``reset`` operations inserted at the beginning of each circuit for each active qubit.
     ``None`` means active reset is not used but instead reset is done by waiting (relaxation). Integer values smaller
     than 1 result in neither active nor reset by wait being used, in which case any reset operations must be explicitly
     added in the circuit."""
     dd_mode: DDMode = Field(DDMode.DISABLED)
     """Control whether dynamical decoupling should be enabled or disabled during the execution."""
-    dd_strategy: Optional[DDStrategy] = Field(None)
+    dd_strategy: DDStrategy | None = Field(None)
     """A particular dynamical decoupling strategy to be used during the execution."""
 
 
@@ -871,28 +919,28 @@ class JobParameters(BaseModel):
     """Job-specific parameters extracted from the original RunRequest."""
 
     shots: int = Field(...)
-    max_circuit_duration_over_t2: Optional[float] = Field(None)
+    max_circuit_duration_over_t2: float | None = Field(None)
     heralding_mode: HeraldingMode = Field(HeraldingMode.NONE)
     move_validation_mode: MoveGateValidationMode = Field(MoveGateValidationMode.STRICT)
     move_gate_frame_tracking_mode: MoveGateFrameTrackingMode = Field(MoveGateFrameTrackingMode.FULL)
     dd_mode: DDMode = Field(DDMode.DISABLED)
-    dd_strategy: Optional[DDStrategy] = Field(None)
+    dd_strategy: DDStrategy | None = Field(None)
 
 
 class Metadata(BaseModel):
     """Metadata describing a circuit execution job."""
 
-    calibration_set_id: Optional[UUID] = Field(None)
+    calibration_set_id: UUID | None = Field(None)
     """ID of the calibration set used"""
-    request: Optional[RunRequest] = Field(None)
+    request: RunRequest | None = Field(None)
     """optional copy of the original RunRequest sent to the server"""
-    parameters: Optional[JobParameters] = Field(None)
+    parameters: JobParameters | None = Field(None)
     """job-specific parameters extracted from the original request"""
-    circuits_batch: Optional[CircuitBatch] = Field(None)
+    circuits_batch: CircuitBatch | None = Field(None)
     """circuits batch submitted for execution"""
-    cocos_version: Optional[str] = Field(None)
+    cocos_version: str | None = Field(None)
     """CoCoS version used to execute the job"""
-    timestamps: Optional[dict[str, str]] = Field(None)
+    timestamps: dict[str, str] | None = Field(None)
     """Timestamps of execution progress"""
 
     @property
@@ -902,7 +950,7 @@ class Metadata(BaseModel):
             return self.parameters.shots
         if self.request is not None:
             return self.request.shots
-        raise ValueError('No shots information available in the metadata')
+        raise ValueError("No shots information available in the metadata")
 
     @property
     def circuits(self) -> CircuitBatch:
@@ -911,7 +959,7 @@ class Metadata(BaseModel):
             return self.circuits_batch
         if self.request is not None:
             return self.request.circuits
-        raise ValueError('No circuits information available in the metadata')
+        raise ValueError("No circuits information available in the metadata")
 
     @property
     def heralding_mode(self) -> HeraldingMode:
@@ -920,7 +968,7 @@ class Metadata(BaseModel):
             return self.parameters.heralding_mode
         if self.request is not None:
             return self.request.heralding_mode
-        raise ValueError('No heralding mode information available in the metadata')
+        raise ValueError("No heralding mode information available in the metadata")
 
     @property
     def dd_mode(self) -> DDMode:
@@ -929,40 +977,37 @@ class Metadata(BaseModel):
             return self.parameters.dd_mode
         if self.request is not None:
             return self.request.dd_mode
-        raise ValueError('No dynamical decoupling mode information available in the metadata')
+        raise ValueError("No dynamical decoupling mode information available in the metadata")
 
     @property
-    def dd_strategy(self) -> Optional[DDStrategy]:
+    def dd_strategy(self) -> DDStrategy | None:
         """Return the dynamical decoupling strategy used with the job."""
         if self.parameters is not None:
             return self.parameters.dd_strategy
         if self.request is not None:
             return self.request.dd_strategy
-        raise ValueError('No dynamical decoupling strategy information available in the metadata')
+        raise ValueError("No dynamical decoupling strategy information available in the metadata")
 
 
 class Status(str, Enum):
-    """
-    Status of a job.
-    """
+    """Status of a job."""
 
-    RECEIVED = 'received'
-    PROCESSING = 'processing'
-    ACCEPTED = 'accepted'
+    RECEIVED = "received"
+    PROCESSING = "processing"
+    ACCEPTED = "accepted"
 
-    PENDING_COMPILATION = 'pending compilation'
-    PENDING_EXECUTION = 'pending execution'
-    READY = 'ready'
-    FAILED = 'failed'
-    ABORTED = 'aborted'
-    PENDING_DELETION = 'pending deletion'
-    DELETION_FAILED = 'deletion failed'
-    DELETED = 'deleted'
+    PENDING_COMPILATION = "pending compilation"
+    PENDING_EXECUTION = "pending execution"
+    READY = "ready"
+    FAILED = "failed"
+    ABORTED = "aborted"
+    PENDING_DELETION = "pending deletion"
+    DELETION_FAILED = "deletion failed"
+    DELETED = "deleted"
 
 
 class RunResult(BaseModel):
-    """
-    Results of the quantum circuit execution job.
+    """Results of the quantum circuit execution job.
     If the job succeeded, :attr:`measurements` contains the output of the batch of circuits,
     consisting of the results of the measurement operations in each circuit.
     It is a list of dictionaries, where each dict maps each measurement key to a 2D array of measurement
@@ -983,17 +1028,17 @@ class RunResult(BaseModel):
 
     status: Status = Field(...)
     """current status of the job, in ``{'pending compilation', 'pending execution', 'ready', 'failed', 'aborted'}``"""
-    measurements: Optional[CircuitMeasurementResultsBatch] = Field(None)
+    measurements: CircuitMeasurementResultsBatch | None = Field(None)
     """if the job has finished successfully, the measurement results for the circuit(s)"""
-    message: Optional[str] = Field(None)
+    message: str | None = Field(None)
     """if the job failed, an error message"""
     metadata: Metadata = Field(...)
     """metadata about the job"""
-    warnings: Optional[list[str]] = Field(None)
+    warnings: list[str] | None = Field(None)
     """list of warning messages"""
 
     @staticmethod
-    def from_dict(inp: dict[str, Union[str, dict, list, None]]) -> RunResult:
+    def from_dict(inp: dict[str, str | dict | list | None]) -> RunResult:
         """Parses the result from a dict.
 
         Args:
@@ -1004,7 +1049,7 @@ class RunResult(BaseModel):
 
         """
         input_copy = inp.copy()
-        return RunResult(status=Status(input_copy.pop('status')), **input_copy)
+        return RunResult(status=Status(input_copy.pop("status")), **input_copy)
 
 
 class RunStatus(BaseModel):
@@ -1012,13 +1057,13 @@ class RunStatus(BaseModel):
 
     status: Status = Field(...)
     """current status of the job, in ``{'pending compilation', 'pending execution', 'ready', 'failed', 'aborted'}``"""
-    message: Optional[str] = Field(None)
+    message: str | None = Field(None)
     """if the job failed, an error message"""
-    warnings: Optional[list[str]] = Field(None)
+    warnings: list[str] | None = Field(None)
     """list of warning messages"""
 
     @staticmethod
-    def from_dict(inp: dict[str, Union[str, dict, list, None]]) -> RunStatus:
+    def from_dict(inp: dict[str, str | dict | list | None]) -> RunStatus:
         """Parses the result from a dict.
 
         Args:
@@ -1029,7 +1074,7 @@ class RunStatus(BaseModel):
 
         """
         input_copy = inp.copy()
-        return RunStatus(status=Status(input_copy.pop('status')), **input_copy)
+        return RunStatus(status=Status(input_copy.pop("status")), **input_copy)
 
 
 class Counts(BaseModel):
@@ -1046,17 +1091,17 @@ class RunCounts(BaseModel):
 
     status: Status = Field(...)
     """current status of the job, in ``{'pending compilation', 'pending execution', 'ready', 'failed', 'aborted'}``"""
-    counts_batch: Optional[list[Counts]] = Field(
+    counts_batch: list[Counts] | None = Field(
         None,
         description="""Measurement results in histogram representation.
-    The `measurement_keys` list provides the order of the measurment keys for the repesentation of the states in the keys
-    of the `counts` dictionary. As an example if `measurement_keys` is `['mk_1', 'mk2']` and `mk_1` refers to `QB1` and `mk_2`
-    refers to `QB3` and `QB5` then counts could contains keys such as '010' with `QB1` in the 0, `QB3` in the 1 and `QB5` in
-    the 0 state.""",
+    The `measurement_keys` list provides the order of the measurement keys for the representation of the states in the 
+    keys of the `counts` dictionary. As an example if `measurement_keys` is `['mk_1', 'mk2']` and `mk_1` refers to `QB1`
+    and `mk_2` refers to `QB3` and `QB5` then counts could contains keys such as '010' with `QB1` in the 0, `QB3` in the
+    1 and `QB5` in the 0 state.""",
     )
 
     @staticmethod
-    def from_dict(inp: dict[str, Union[str, dict, list, None]]) -> RunCounts:
+    def from_dict(inp: dict[str, str | dict | list | None]) -> RunCounts:
         """Parses the result from a dict.
 
         Args:
@@ -1067,7 +1112,7 @@ class RunCounts(BaseModel):
 
         """
         input_copy = inp.copy()
-        return RunCounts(status=Status(input_copy.pop('status')), **input_copy)
+        return RunCounts(status=Status(input_copy.pop("status")), **input_copy)
 
 
 class ClientLibrary(BaseModel):
@@ -1080,11 +1125,12 @@ class ClientLibrary(BaseModel):
         package_url: URL to the package in the package repository.
         min: minimum supported version.
         max: maximum supported version.
+
     """
 
     name: str
-    package_name: Optional[str] = Field(None)
-    repo_url: Optional[str] = Field(None)
-    package_url: Optional[str] = Field(None)
+    package_name: str | None = Field(None)
+    repo_url: str | None = Field(None)
+    package_url: str | None = Field(None)
     min: str
     max: str

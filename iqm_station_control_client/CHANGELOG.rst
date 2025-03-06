@@ -2,6 +2,11 @@
 Changelog
 =========
 
+Version 3.5 (2025-03-05)
+========================
+
+- Bump station control dependencies
+
 Version 3.4 (2025-03-05)
 ========================
 

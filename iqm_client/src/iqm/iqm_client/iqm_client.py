@@ -11,14 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# pylint: disable=too-many-lines
-r"""
-Client for connecting to the IQM quantum computer server interface.
-"""
+"""Client for connecting to the IQM quantum computer server interface."""
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from importlib.metadata import version
 import itertools
@@ -26,27 +23,26 @@ import json
 import os
 import platform
 import time
-from typing import Any, Callable, Optional
+from typing import Any
 from uuid import UUID
 import warnings
-
-from packaging.version import parse
-import requests
-from requests import HTTPError
 
 from iqm.iqm_client.api import APIConfig, APIEndpoint, APIVariant
 from iqm.iqm_client.authentication import TokenManager
 from iqm.iqm_client.errors import (
     APITimeoutError,
     ArchitectureRetrievalError,
+    CalibrationSetRetrievalError,
     CircuitExecutionError,
     CircuitValidationError,
     ClientAuthenticationError,
     ClientConfigurationError,
     JobAbortionError,
+    QualityMetricSetRetrievalError,
 )
 from iqm.iqm_client.models import (
     _SUPPORTED_OPERATIONS,
+    CalibrationSet,
     Circuit,
     CircuitBatch,
     CircuitCompilationOptions,
@@ -54,6 +50,7 @@ from iqm.iqm_client.models import (
     DynamicQuantumArchitecture,
     Instruction,
     MoveGateValidationMode,
+    QualityMetricSet,
     QuantumArchitecture,
     QuantumArchitectureSpecification,
     RunCounts,
@@ -64,10 +61,13 @@ from iqm.iqm_client.models import (
     serialize_qubit_mapping,
     validate_circuit,
 )
+from packaging.version import parse
+import requests
+from requests import HTTPError
 
-REQUESTS_TIMEOUT = float(os.environ.get('IQM_CLIENT_REQUESTS_TIMEOUT', 60.0))
+REQUESTS_TIMEOUT = float(os.environ.get("IQM_CLIENT_REQUESTS_TIMEOUT", 60.0))
 DEFAULT_TIMEOUT_SECONDS = 900
-SECONDS_BETWEEN_CALLS = float(os.environ.get('IQM_CLIENT_SECONDS_BETWEEN_CALLS', 1.0))
+SECONDS_BETWEEN_CALLS = float(os.environ.get("IQM_CLIENT_SECONDS_BETWEEN_CALLS", 1.0))
 
 
 class IQMClient:
@@ -95,40 +95,41 @@ class IQMClient:
     :envvar:`IQM_AUTH_USERNAME` and :envvar:`IQM_AUTH_PASSWORD`. All parameters must be given either
     as keyword arguments or as environment variables. Same combination restrictions apply
     for values given as environment variables as for keyword arguments.
+
     """
 
     def __init__(
         self,
         url: str,
         *,
-        client_signature: Optional[str] = None,
-        token: Optional[str] = None,
-        tokens_file: Optional[str] = None,
-        auth_server_url: Optional[str] = None,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
-        api_variant: Optional[APIVariant] = None,
+        client_signature: str | None = None,
+        token: str | None = None,
+        tokens_file: str | None = None,
+        auth_server_url: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
+        api_variant: APIVariant | None = None,
     ):
-        if not url.startswith(('http:', 'https:')):
-            raise ClientConfigurationError(f'The URL schema has to be http or https. Incorrect schema in URL: {url}')
-        self._token_manager: Optional[TokenManager] = TokenManager(
+        if not url.startswith(("http:", "https:")):
+            raise ClientConfigurationError(f"The URL schema has to be http or https. Incorrect schema in URL: {url}")
+        self._token_manager: TokenManager | None = TokenManager(
             token,
             tokens_file,
             auth_server_url,
             username,
             password,
         )
-        version_string = 'iqm-client'
-        self._signature = f'{platform.platform(terse=True)}'
-        self._signature += f', python {platform.python_version()}'
-        self._signature += f', iqm-client {version(version_string)}'
+        version_string = "iqm-client"
+        self._signature = f"{platform.platform(terse=True)}"
+        self._signature += f", python {platform.python_version()}"
+        self._signature += f", iqm-client {version(version_string)}"
         if client_signature:
-            self._signature += f', {client_signature}'
+            self._signature += f", {client_signature}"
         self._architecture: QuantumArchitectureSpecification | None = None
         self._dynamic_architectures: dict[UUID, DynamicQuantumArchitecture] = {}
 
         if api_variant is None:
-            env_var = os.environ.get('IQM_CLIENT_API_VARIANT')
+            env_var = os.environ.get("IQM_CLIENT_API_VARIANT")
             api_variant = APIVariant(env_var) if env_var else APIVariant.V1
         self._api = APIConfig(api_variant, url)
         if (version_incompatibility_msg := self._check_versions()) is not None:
@@ -138,14 +139,14 @@ class IQMClient:
         try:
             # try our best to close the auth session, doesn't matter if it fails,
             self.close_auth_session()
-        except Exception:  # pylint: disable=broad-except
+        except Exception:
             pass
 
     def _retry_request_on_error(self, request: Callable[[], requests.Response]) -> requests.Response:
         """This is a temporary workaround for 502 errors.
         The current implementation of the server side can run out of network connections
-        and silently drop incoming connections making IQM Client to fail with 502 errors."""
-
+        and silently drop incoming connections making IQM Client to fail with 502 errors.
+        """
         while True:
             result = request()
             if result.status_code == 502:
@@ -155,16 +156,15 @@ class IQMClient:
 
         return result
 
-    # pylint: disable=too-many-locals
     def submit_circuits(
         self,
         circuits: CircuitBatch,
         *,
-        qubit_mapping: Optional[dict[str, str]] = None,
-        custom_settings: Optional[dict[str, Any]] = None,
-        calibration_set_id: Optional[UUID] = None,
+        qubit_mapping: dict[str, str] | None = None,
+        custom_settings: dict[str, Any] | None = None,
+        calibration_set_id: UUID | None = None,
         shots: int = 1,
-        options: Optional[CircuitCompilationOptions] = None,
+        options: CircuitCompilationOptions | None = None,
     ) -> UUID:
         """Submits a batch of quantum circuits for execution on a quantum computer.
 
@@ -178,8 +178,10 @@ class IQMClient:
             calibration_set_id: ID of the calibration set to use, or ``None`` to use the latest one
             shots: Number of times ``circuits`` are executed. Must be greater than zero
             options: Various discrete options for compiling quantum circuits to instruction schedules.
+
         Returns:
             ID for the created job. This ID is needed to query the job status and the execution results.
+
         """
         run_request = self.create_run_request(
             circuits=circuits,
@@ -196,11 +198,11 @@ class IQMClient:
         self,
         circuits: CircuitBatch,
         *,
-        qubit_mapping: Optional[dict[str, str]] = None,
-        custom_settings: Optional[dict[str, Any]] = None,
-        calibration_set_id: Optional[UUID] = None,
+        qubit_mapping: dict[str, str] | None = None,
+        custom_settings: dict[str, Any] | None = None,
+        calibration_set_id: UUID | None = None,
         shots: int = 1,
-        options: Optional[CircuitCompilationOptions] = None,
+        options: CircuitCompilationOptions | None = None,
     ) -> RunRequest:
         """Creates a run request for executing circuits without sending it to the server.
 
@@ -219,11 +221,13 @@ class IQMClient:
             calibration_set_id: ID of the calibration set to use, or ``None`` to use the latest one
             shots: Number of times ``circuits`` are executed. Must be greater than zero.
             options: Various discrete options for compiling quantum circuits to instruction schedules.
+
         Returns:
             RunRequest that would be submitted by equivalent call to :meth:`submit_circuits`.
+
         """
         if shots < 1:
-            raise ValueError('Number of shots must be greater than zero.')
+            raise ValueError("Number of shots must be greater than zero.")
         if options is None:
             options = CircuitCompilationOptions()
 
@@ -232,7 +236,7 @@ class IQMClient:
                 # validate the circuit against the static information in iqm.iqm_client.models._SUPPORTED_OPERATIONS
                 validate_circuit(circuit)
             except ValueError as e:
-                raise CircuitValidationError(f'The circuit at index {i} failed the validation').with_traceback(
+                raise CircuitValidationError(f"The circuit at index {i} failed the validation").with_traceback(
                     e.__traceback__
                 )
 
@@ -271,14 +275,14 @@ class IQMClient:
 
         Args:
             run_request: the run request to be submitted for execution.
+
         Returns:
             ID for the created job. This ID is needed to query the job status and the execution results.
+
         """
-        headers = {'Expect': '100-Continue', **self._default_headers()}
+        headers = {"Expect": "100-Continue", **self._default_headers()}
         try:
             # check if someone is trying to profile us with OpenTelemetry
-            # pylint: disable=import-outside-toplevel
-            # pylint: disable=import-error
             from opentelemetry import propagate
 
             propagate.inject(headers)
@@ -286,8 +290,8 @@ class IQMClient:
             # no OpenTelemetry, no problem
             pass
 
-        if os.environ.get('IQM_CLIENT_DEBUG') == '1':
-            print(f'\nIQM CLIENT DEBUGGING ENABLED\nSUBMITTING RUN REQUEST:\n{run_request}\n')
+        if os.environ.get("IQM_CLIENT_DEBUG") == "1":
+            print(f"\nIQM CLIENT DEBUGGING ENABLED\nSUBMITTING RUN REQUEST:\n{run_request}\n")
 
         result = self._retry_request_on_error(
             lambda: requests.post(
@@ -301,24 +305,24 @@ class IQMClient:
         self._check_not_found_error(result)
 
         if result.status_code == 401:
-            raise ClientAuthenticationError(f'Authentication failed: {result.text}')
+            raise ClientAuthenticationError(f"Authentication failed: {result.text}")
 
         if 400 <= result.status_code < 500:
-            raise ClientConfigurationError(f'Client configuration error: {result.text}')
+            raise ClientConfigurationError(f"Client configuration error: {result.text}")
 
         result.raise_for_status()
 
         try:
-            job_id = UUID(result.json()['id'])
+            job_id = UUID(result.json()["id"])
             return job_id
         except (json.decoder.JSONDecodeError, KeyError) as e:
-            raise CircuitExecutionError(f'Invalid response: {result.text}, {e}') from e
+            raise CircuitExecutionError(f"Invalid response: {result.text}, {e}") from e
 
     @staticmethod
     def _validate_qubit_mapping(
         architecture: DynamicQuantumArchitecture,
         circuits: CircuitBatch,
-        qubit_mapping: Optional[dict[str, str]] = None,
+        qubit_mapping: dict[str, str] | None = None,
     ) -> None:
         """Validates the given qubit mapping, if defined.
 
@@ -331,6 +335,7 @@ class IQMClient:
 
         Raises:
             CircuitValidationError: There was something wrong with ``circuits``.
+
         """
         if qubit_mapping is None:
             return
@@ -338,7 +343,7 @@ class IQMClient:
         # check if qubit mapping is injective
         target_qubits = set(qubit_mapping.values())
         if not len(target_qubits) == len(qubit_mapping):
-            raise CircuitValidationError('Multiple logical qubits map to the same physical qubit.')
+            raise CircuitValidationError("Multiple logical qubits map to the same physical qubit.")
 
         # check if qubit mapping covers all qubits in the circuits
         for i, circuit in enumerate(circuits):
@@ -346,19 +351,19 @@ class IQMClient:
             if diff:
                 raise CircuitValidationError(
                     f"The qubits {diff} in circuit '{circuit.name}' at index {i} "
-                    f'are not found in the provided qubit mapping.'
+                    f"are not found in the provided qubit mapping."
                 )
 
         # check that each mapped qubit is defined in the quantum architecture
         for _logical, physical in qubit_mapping.items():
             if physical not in architecture.components:
-                raise CircuitValidationError(f'Component {physical} not present in dynamic quantum architecture')
+                raise CircuitValidationError(f"Component {physical} not present in dynamic quantum architecture")
 
     @staticmethod
     def _validate_circuit_instructions(
         architecture: DynamicQuantumArchitecture,
         circuits: CircuitBatch,
-        qubit_mapping: Optional[dict[str, str]] = None,
+        qubit_mapping: dict[str, str] | None = None,
         validate_moves: MoveGateValidationMode = MoveGateValidationMode.STRICT,
         *,
         must_close_sandwiches: bool = True,
@@ -376,16 +381,17 @@ class IQMClient:
 
         Raises:
             CircuitValidationError: validation failed
+
         """
         for index, circuit in enumerate(circuits):
             measurement_keys: set[str] = set()
             for instr in circuit.instructions:
                 IQMClient._validate_instruction(architecture, instr, qubit_mapping)
                 # check measurement key uniqueness
-                if instr.name in {'measure', 'measurement'}:
-                    key = instr.args['key']
+                if instr.name in {"measure", "measurement"}:
+                    key = instr.args["key"]
                     if key in measurement_keys:
-                        raise CircuitValidationError(f'Circuit {index}: {instr!r} has a non-unique measurement key.')
+                        raise CircuitValidationError(f"Circuit {index}: {instr!r} has a non-unique measurement key.")
                     measurement_keys.add(key)
             IQMClient._validate_circuit_moves(
                 architecture,
@@ -399,7 +405,7 @@ class IQMClient:
     def _validate_instruction(
         architecture: DynamicQuantumArchitecture,
         instruction: Instruction,
-        qubit_mapping: Optional[dict[str, str]] = None,
+        qubit_mapping: dict[str, str] | None = None,
     ) -> None:
         """Validate an instruction against the dynamic quantum quantum architecture.
 
@@ -413,6 +419,7 @@ class IQMClient:
 
         Raises:
             CircuitValidationError: validation failed
+
         """
         op_info = _SUPPORTED_OPERATIONS.get(instruction.name)
         if op_info is None:
@@ -426,14 +433,14 @@ class IQMClient:
             for q, mapped_q in zip(instruction.qubits, mapped_qubits):
                 if mapped_q not in allowed_components:
                     raise CircuitValidationError(
-                        f'{instruction!r}: Component {q} = {mapped_q} {msg}.'
+                        f"{instruction!r}: Component {q} = {mapped_q} {msg}."
                         if qubit_mapping
-                        else f'{instruction!r}: Component {q} {msg}.'
+                        else f"{instruction!r}: Component {q} {msg}."
                     )
 
         if op_info.no_calibration_needed:
             # all QPU loci are allowed
-            check_locus_components(architecture.components, msg='does not exist on the QPU')
+            check_locus_components(architecture.components, msg="does not exist on the QPU")
             return
 
         gate_info = architecture.gates.get(instruction.name)
@@ -448,19 +455,19 @@ class IQMClient:
             if impl_info is None:
                 raise CircuitValidationError(
                     f"Operation '{instruction.name}' implementation '{instruction.implementation}' "
-                    f'is not supported by the dynamic quantum architecture.'
+                    f"is not supported by the dynamic quantum architecture."
                 )
             allowed_loci = impl_info.loci
-            instruction_name = f'{instruction.name}.{instruction.implementation}'
+            instruction_name = f"{instruction.name}.{instruction.implementation}"
         else:
             # any implementation is fine
             allowed_loci = gate_info.loci
-            instruction_name = f'{instruction.name}'
+            instruction_name = f"{instruction.name}"
 
         if op_info.factorizable:
             # Check that all the locus components are allowed by the architecture
             check_locus_components(
-                set(q for locus in allowed_loci for q in locus), msg=f"is not allowed as locus for '{instruction_name}'"
+                {q for locus in allowed_loci for q in locus}, msg=f"is not allowed as locus for '{instruction_name}'"
             )
             return
 
@@ -481,7 +488,7 @@ class IQMClient:
     def _validate_circuit_moves(
         architecture: DynamicQuantumArchitecture,
         circuit: Circuit,
-        qubit_mapping: Optional[dict[str, str]] = None,
+        qubit_mapping: dict[str, str] | None = None,
         validate_moves: MoveGateValidationMode = MoveGateValidationMode.STRICT,
         *,
         must_close_sandwiches: bool = True,
@@ -495,23 +502,24 @@ class IQMClient:
                 Can be set to ``None`` if the ``circuit`` already uses physical qubit names.
             validate_moves: Option for bypassing full or partial MOVE gate validation.
             must_close_sandwiches: Iff True, MOVE sandwiches cannot be left open when the circuit ends.
+
         Raises:
             CircuitValidationError: validation failed
+
         """
-        # pylint: disable=too-many-branches
         if validate_moves == MoveGateValidationMode.NONE:
             return
-        move_gate = 'move'
+        move_gate = "move"
         # Check if MOVE gates are allowed on this architecture
         if move_gate not in architecture.gates:
             if any(i.name == move_gate for i in circuit.instructions):
-                raise CircuitValidationError('MOVE instruction is not supported by the given device architecture.')
+                raise CircuitValidationError("MOVE instruction is not supported by the given device architecture.")
             return
 
         # some gates are allowed in MOVE sandwiches
-        allowed_gates = {'barrier'}
+        allowed_gates = {"barrier"}
         if validate_moves == MoveGateValidationMode.ALLOW_PRX:
-            allowed_gates.add('prx')
+            allowed_gates.add("prx")
 
         all_resonators = set(architecture.computational_resonators)
         all_qubits = set(architecture.qubits)
@@ -526,19 +534,19 @@ class IQMClient:
         moved_qubits: set[str] = set()
 
         for inst in circuit.instructions:
-            if inst.name == 'move':
+            if inst.name == "move":
                 qubit, resonator = inst.qubits
                 if not (qubit in all_qubits and resonator in all_resonators):
                     raise CircuitValidationError(
-                        f'MOVE instructions are only allowed between qubit and resonator, not {inst.qubits}.'
+                        f"MOVE instructions are only allowed between qubit and resonator, not {inst.qubits}."
                     )
 
                 if (resonator_qubit := resonator_occupations.get(resonator)) is None:
                     # Beginning MOVE: check that the qubit hasn't been moved to another resonator
                     if qubit in moved_qubits:
                         raise CircuitValidationError(
-                            f'MOVE instruction {inst.qubits}: state of {qubit} is '
-                            f'in another resonator: {resonator_occupations}.'
+                            f"MOVE instruction {inst.qubits}: state of {qubit} is "
+                            f"in another resonator: {resonator_occupations}."
                         )
                     resonator_occupations[resonator] = qubit
                     moved_qubits.add(qubit)
@@ -546,7 +554,7 @@ class IQMClient:
                     # Ending MOVE: check that the qubit matches to the qubit that was moved to the resonator
                     if resonator_qubit != qubit:
                         raise CircuitValidationError(
-                            f'MOVE instruction {inst.qubits} to an already occupied resonator: {resonator_occupations}.'
+                            f"MOVE instruction {inst.qubits} to an already occupied resonator: {resonator_occupations}."
                         )
                     del resonator_occupations[resonator]
                     moved_qubits.remove(qubit)
@@ -555,19 +563,18 @@ class IQMClient:
                 if inst.name not in allowed_gates:
                     if overlap := set(inst.qubits) & moved_qubits:
                         raise CircuitValidationError(
-                            f'Instruction {inst.name} acts on {inst.qubits} while the state(s) of {overlap} '
-                            f'are in a resonator. Current resonator occupation: {resonator_occupations}.'
+                            f"Instruction {inst.name} acts on {inst.qubits} while the state(s) of {overlap} "
+                            f"are in a resonator. Current resonator occupation: {resonator_occupations}."
                         )
 
         # Finally validate that all MOVE sandwiches have been ended before the circuit ends
         if must_close_sandwiches and resonator_occupations:
             raise CircuitValidationError(
-                f'Circuit ends while qubit state(s) are still in a resonator: {resonator_occupations}.'
+                f"Circuit ends while qubit state(s) are still in a resonator: {resonator_occupations}."
             )
 
     def _get_run_v1(self, job_id: UUID, timeout_secs: float = REQUESTS_TIMEOUT) -> RunResult:
-        """
-        V1 API (Cocos circuits execution and Resonance) has an inefficient `GET /jobs/<id>` endpoint
+        """V1 API (Cocos circuits execution and Resonance) has an inefficient `GET /jobs/<id>` endpoint
         that returns the full job status, including the result and the original request, in a single call.
         """
         result = self._retry_request_on_error(
@@ -582,9 +589,7 @@ class IQMClient:
         return RunResult.from_dict(result.json())
 
     def _get_run_v2(self, job_id: UUID, timeout_secs: float = REQUESTS_TIMEOUT) -> RunResult:
-        """
-        V2 API (Station-based circuits execution) has granular endpoints for job status and result.
-        """
+        """V2 API (Station-based circuits execution) has granular endpoints for job status and result."""
         status_response = requests.get(
             self._api.url(APIEndpoint.GET_JOB_STATUS, str(job_id)),
             headers=self._default_headers(),
@@ -593,17 +598,17 @@ class IQMClient:
         self._check_not_found_error(status_response)
         status_response.raise_for_status()
         status = status_response.json()
-        if Status(status['status']) not in [Status.READY, Status.ABORTED, Status.DELETED, Status.FAILED]:
+        if Status(status["status"]) not in [Status.READY, Status.ABORTED, Status.DELETED, Status.FAILED]:
             return RunResult.from_dict(
                 {
-                    'measurements': [],
-                    'status': status['status'],
-                    'message': '',
-                    'metadata': {
-                        'calibration_set_id': None,
-                        'circuits_batch': [],
-                        'parameters': None,
-                        'timestamps': {},
+                    "measurements": [],
+                    "status": status["status"],
+                    "message": "",
+                    "metadata": {
+                        "calibration_set_id": None,
+                        "circuits_batch": [],
+                        "parameters": None,
+                        "timestamps": {},
                     },
                 }
             )
@@ -662,24 +667,24 @@ class IQMClient:
         error_message = error_message_response.text if error_message_response.status_code == 200 else None
         return RunResult.from_dict(
             {
-                'measurements': measurements,
-                'status': status['status'],
-                'message': error_message,
-                'metadata': {
-                    '`': calibration_set_id,
-                    'circuits_batch': circuits_batch,
-                    'parameters': (
+                "measurements": measurements,
+                "status": status["status"],
+                "message": error_message,
+                "metadata": {
+                    "`": calibration_set_id,
+                    "circuits_batch": circuits_batch,
+                    "parameters": (
                         None
                         if result.status_code == 404
                         else {
-                            'shots': request_parameters['shots'],
-                            'max_circuit_duration_over_t2': request_parameters['max_circuit_duration_over_t2'],
-                            'heralding_mode': request_parameters['heralding_mode'],
-                            'move_validation_mode': request_parameters['move_validation_mode'],
-                            'move_gate_frame_tracking_mode': request_parameters['move_gate_frame_tracking_mode'],
+                            "shots": request_parameters["shots"],
+                            "max_circuit_duration_over_t2": request_parameters["max_circuit_duration_over_t2"],
+                            "heralding_mode": request_parameters["heralding_mode"],
+                            "move_validation_mode": request_parameters["move_validation_mode"],
+                            "move_gate_frame_tracking_mode": request_parameters["move_gate_frame_tracking_mode"],
                         }
                     ),
-                    'timestamps': {datapoint['stage']: datapoint['timestamp'] for datapoint in timeline},
+                    "timestamps": {datapoint["stage"]: datapoint["timestamp"] for datapoint in timeline},
                 },
             }
         )
@@ -697,6 +702,7 @@ class IQMClient:
         Raises:
             CircuitExecutionError: IQM server specific exceptions
             HTTPException: HTTP exceptions
+
         """
         try:
             if self._api.variant == APIVariant.V2:
@@ -704,7 +710,7 @@ class IQMClient:
             else:
                 run_result = self._get_run_v1(job_id, timeout_secs)
         except (json.decoder.JSONDecodeError, KeyError) as e:
-            raise CircuitExecutionError(f'Invalid response: {e}') from e
+            raise CircuitExecutionError(f"Invalid response: {e}") from e
 
         if run_result.warnings:
             for warning in run_result.warnings:
@@ -726,6 +732,7 @@ class IQMClient:
         Raises:
             CircuitExecutionError: IQM server specific exceptions
             HTTPException: HTTP exceptions
+
         """
         result = self._retry_request_on_error(
             lambda: requests.get(
@@ -740,7 +747,7 @@ class IQMClient:
         try:
             run_result = RunStatus.from_dict(result.json())
         except (json.decoder.JSONDecodeError, KeyError) as e:
-            raise CircuitExecutionError(f'Invalid response: {result.text}, {e}') from e
+            raise CircuitExecutionError(f"Invalid response: {result.text}, {e}") from e
 
         if run_result.warnings:
             for warning in run_result.warnings:
@@ -759,6 +766,7 @@ class IQMClient:
 
         Raises:
             APITimeoutError: time exceeded the set timeout
+
         """
         start_time = datetime.now()
         while (datetime.now() - start_time).total_seconds() < timeout_secs:
@@ -783,6 +791,7 @@ class IQMClient:
 
         Raises:
             APITimeoutError: time exceeded the set timeout
+
         """
         start_time = datetime.now()
         while (datetime.now() - start_time).total_seconds() < timeout_secs:
@@ -807,6 +816,7 @@ class IQMClient:
 
         Raises:
             JobAbortionError: if aborting the job failed
+
         """
         result = requests.post(
             self._api.url(APIEndpoint.ABORT_JOB, str(job_id)),
@@ -818,7 +828,8 @@ class IQMClient:
 
     def get_quantum_architecture(self, *, timeout_secs: float = REQUESTS_TIMEOUT) -> QuantumArchitectureSpecification:
         """Retrieve quantum architecture from server.
-        Caches the result and returns the same result on later invocations.
+
+        Caches the result and returns it on later invocations.
 
         Args:
             timeout_secs: network request timeout
@@ -830,6 +841,7 @@ class IQMClient:
             ArchitectureRetrievalError: IQM server specific exceptions
             ClientAuthenticationError: if no valid authentication is provided
             HTTPException: HTTP exceptions
+
         """
         if self._architecture:
             return self._architecture
@@ -848,14 +860,96 @@ class IQMClient:
             qa = QuantumArchitecture(**result.json()).quantum_architecture
         except (json.decoder.JSONDecodeError, KeyError) as e:
             # show the error class also
-            raise ArchitectureRetrievalError(f'Invalid response: {result.text}, {e!r}') from e
+            raise ArchitectureRetrievalError(f"Invalid response: {result.text}, {e!r}") from e
 
         # Cache architecture so that later invocations do not need to query it again
         self._architecture = qa
         return qa
 
+    def get_quality_metric_set(
+        self, calibration_set_id: UUID | None = None, *, timeout_secs: float = REQUESTS_TIMEOUT
+    ) -> QualityMetricSet:
+        """Retrieve the latest quality metric set for the given calibration set from the server.
+
+        Args:
+            calibration_set_id: ID of the calibration set for which the quality metrics are returned.
+                If None, the current default calibration set is used.
+            timeout_secs: network request timeout.
+
+        Returns:
+            Requested quality metric set.
+
+        Raises:
+            QualityMetricsRetrievalError: IQM server specific exceptions
+            ClientAuthenticationError: if no valid authentication is provided
+            HTTPException: HTTP exceptions
+
+        """
+        if calibration_set_id is None:
+            calibration_set_id_str = "default"
+        else:
+            calibration_set_id_str = str(calibration_set_id)
+
+        result = requests.get(
+            self._api.url(APIEndpoint.QUALITY_METRICS, calibration_set_id_str),
+            headers=self._default_headers(),
+            timeout=timeout_secs,
+        )
+
+        self._check_not_found_error(result)
+        self._check_authentication_errors(result)
+        result.raise_for_status()
+
+        try:
+            qm = QualityMetricSet(**result.json())
+        except (json.decoder.JSONDecodeError, KeyError) as e:
+            raise QualityMetricSetRetrievalError(f"Invalid response: {result.text}, {e}") from e
+
+        return qm
+
+    def get_calibration_set(
+        self, calibration_set_id: UUID | None = None, *, timeout_secs: float = REQUESTS_TIMEOUT
+    ) -> CalibrationSet:
+        """Retrieve the given calibration set from the server.
+
+        Args:
+            calibration_set_id: ID of the calibration set to retrieve. If None, the current default
+                calibration set is used.
+            timeout_secs: network request timeout
+
+        Returns:
+            Requested calibration set.
+
+        Raises:
+            CalibrationSetRetrievalError: IQM server specific exceptions
+            ClientAuthenticationError: No valid authentication is provided
+            HTTPException: HTTP exceptions
+
+        """
+        if calibration_set_id is None:
+            calibration_set_id_str = "default"
+        else:
+            calibration_set_id_str = str(calibration_set_id)
+
+        result = requests.get(
+            self._api.url(APIEndpoint.CALIBRATION, calibration_set_id_str),
+            headers=self._default_headers(),
+            timeout=timeout_secs,
+        )
+
+        self._check_not_found_error(result)
+        self._check_authentication_errors(result)
+        result.raise_for_status()
+
+        try:
+            cs = CalibrationSet(**result.json())
+        except (json.decoder.JSONDecodeError, KeyError) as e:
+            raise CalibrationSetRetrievalError(f"Invalid response: {result.text}, {e}") from e
+
+        return cs
+
     def get_dynamic_quantum_architecture(
-        self, calibration_set_id: Optional[UUID] = None, *, timeout_secs: float = REQUESTS_TIMEOUT
+        self, calibration_set_id: UUID | None = None, *, timeout_secs: float = REQUESTS_TIMEOUT
     ) -> DynamicQuantumArchitecture:
         """Retrieve dynamic quantum architecture (DQA) for the given calibration set from server.
 
@@ -875,9 +969,10 @@ class IQMClient:
             ArchitectureRetrievalError: IQM server specific exceptions
             ClientAuthenticationError: if no valid authentication is provided
             HTTPException: HTTP exceptions
+
         """
         if calibration_set_id is None:
-            calibration_set_id_str = 'default'
+            calibration_set_id_str = "default"
         elif calibration_set_id in self._dynamic_architectures:
             return self._dynamic_architectures[calibration_set_id]
         else:
@@ -896,7 +991,7 @@ class IQMClient:
         try:
             dqa = DynamicQuantumArchitecture(**result.json())
         except (json.decoder.JSONDecodeError, KeyError) as e:
-            raise ArchitectureRetrievalError(f'Invalid response: {result.text}, {e}') from e
+            raise ArchitectureRetrievalError(f"Invalid response: {result.text}, {e}") from e
 
         # Cache architecture so that later invocations do not need to query it again
         self._dynamic_architectures[dqa.calibration_set_id] = dqa
@@ -919,6 +1014,7 @@ class IQMClient:
         Raises:
             ClientAuthenticationError: if no valid authentication is provided
             HTTPException: HTTP exceptions
+
         """
         result = requests.get(
             self._api.url(APIEndpoint.CHANNEL_PROPERTIES),
@@ -931,7 +1027,7 @@ class IQMClient:
         try:
             channel_properties = result.json()
         except (json.decoder.JSONDecodeError, KeyError) as e:
-            raise HTTPError(f'Invalid response: {result.text}, {e}') from e
+            raise HTTPError(f"Invalid response: {result.text}, {e}") from e
 
         all_qubits = self.get_quantum_architecture().qubits
         groups: dict[str, set[str]] = {}
@@ -939,10 +1035,10 @@ class IQMClient:
         # A qubit may belong to multiple groups.
         for channel_name, properties in channel_properties.items():
             # Relying on naming convention because we don't have proper mapping available:
-            qubit = channel_name.split('__')[0]
+            qubit = channel_name.split("__")[0]
             if qubit not in all_qubits:
                 continue
-            for source in properties.get('fast_feedback_sources', ()):
+            for source in properties.get("fast_feedback_sources", ()):
                 groups.setdefault(source, set()).add(qubit)
         # Merge identical groups
         unique_groups: set[frozenset[str]] = {frozenset(group) for group in groups.values()}
@@ -958,70 +1054,74 @@ class IQMClient:
         Raises:
             ClientAuthenticationError: if logout failed
             ClientAuthenticationError: if asked to close externally managed authentication session
+
         """
         if self._token_manager is None:
             return False
         return self._token_manager.close()
 
     def _default_headers(self) -> dict[str, str]:
-        headers = {'User-Agent': self._signature}
+        """Default headers for HTTP requests to the IQM server."""
+        headers = {"User-Agent": self._signature}
         if self._token_manager is not None:
             bearer_token = self._token_manager.get_bearer_token()
             if bearer_token:
-                headers['Authorization'] = bearer_token
+                headers["Authorization"] = bearer_token
         return headers
 
     @staticmethod
     def _check_authentication_errors(result: requests.Response) -> None:
+        """Raise ClientAuthenticationError with appropriate message if the authentication failed for some reason."""
         # for not strictly authenticated endpoints,
         # we need to handle 302 redirects to the auth server login page
         if result.history and any(
             response.status_code == 302 for response in result.history
         ):  # pragma: no cover (generators are broken in coverage)
-            raise ClientAuthenticationError('Authentication is required.')
+            raise ClientAuthenticationError("Authentication is required.")
         if result.status_code == 401:
-            raise ClientAuthenticationError(f'Authentication failed: {result.text}')
+            raise ClientAuthenticationError(f"Authentication failed: {result.text}")
 
     def _check_not_found_error(self, response: requests.Response) -> None:
-        """Raises HTTPError with appropriate message if ``response.status_code == 404``."""
+        """Raise HTTPError with appropriate message if ``response.status_code == 404``."""
         if response.status_code == 404:
-            version_message = ''
+            version_message = ""
             if (version_incompatibility_msg := self._check_versions()) is not None:
                 version_message = (
-                    f' This may be caused by the server version not supporting this endpoint. '
-                    f'{version_incompatibility_msg}'
+                    f" This may be caused by the server version not supporting this endpoint. "
+                    f"{version_incompatibility_msg}"
                 )
-            raise HTTPError(f'{response.url} not found.{version_message}', response=response)
+            raise HTTPError(f"{response.url} not found.{version_message}", response=response)
 
-    def _check_versions(self) -> Optional[str]:
+    def _check_versions(self) -> str | None:
         """Checks the client version against compatible client versions reported by server.
 
         Returns:
             A message about client incompatibility with the server if the versions are incompatible or if the
             compatibility could not be confirmed, None if they are compatible.
+
         """
         try:
             libraries = self.get_supported_client_libraries()
             compatible_iqm_client = libraries.get(
-                'iqm-client',
-                libraries.get('iqm_client'),
+                "iqm-client",
+                libraries.get("iqm_client"),
             )
             if compatible_iqm_client is None:
-                return 'Could not verify IQM Client compatibility with the server. You might encounter issues.'
+                return "Could not verify IQM Client compatibility with the server. You might encounter issues."
             min_version = parse(compatible_iqm_client.min)
             max_version = parse(compatible_iqm_client.max)
-            client_version = parse(version('iqm-client'))
+            client_version = parse(version("iqm-client"))
             if client_version < min_version or client_version >= max_version:
                 return (
-                    f'Your IQM Client version {client_version} was built for a different version of IQM Server. '
-                    f'You might encounter issues. For the best experience, consider using a version '
-                    f'of IQM Client that satisfies {min_version} <= iqm-client < {max_version}.'
+                    f"Your IQM Client version {client_version} was built for a different version of IQM Server. "
+                    f"You might encounter issues. For the best experience, consider using a version "
+                    f"of IQM Client that satisfies {min_version} <= iqm-client < {max_version}."
                 )
             return None
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             # we don't want the version check to prevent usage of IQMClient in any situation
             check_error = e
-        return f'Could not verify IQM Client compatibility with the server. You might encounter issues. {check_error}'
+        return f"Could not verify IQM Client compatibility with the server. You might encounter issues. {check_error}"
 
     def get_run_counts(self, job_id: UUID, *, timeout_secs: float = REQUESTS_TIMEOUT) -> RunCounts:
         """Query the counts of an executed job.
@@ -1036,6 +1136,7 @@ class IQMClient:
         Raises:
             CircuitExecutionError: IQM server specific exceptions
             HTTPException: HTTP exceptions
+
         """
         result = self._retry_request_on_error(
             lambda: requests.get(
@@ -1050,7 +1151,7 @@ class IQMClient:
         try:
             run_counts = RunCounts.from_dict(result.json())
         except (json.decoder.JSONDecodeError, KeyError) as e:
-            raise CircuitExecutionError(f'Invalid response: {result.text}, {e}') from e
+            raise CircuitExecutionError(f"Invalid response: {result.text}, {e}") from e
 
         return run_counts
 
@@ -1066,6 +1167,7 @@ class IQMClient:
         Raises:
             HTTPError: HTTP exceptions
             ClientAuthenticationError: if authentication fails
+
         """
         result = requests.get(
             self._api.url(APIEndpoint.CLIENT_LIBRARIES),
