@@ -655,7 +655,7 @@ class StationControlClient:
     def _poll_task(self, task_id: str) -> dict:
         task = self._send_request(requests.get, f"tasks/{task_id}").json()
         if task["task_status"] == "FAILURE":
-            raise InternalServerError(task)
+            raise InternalServerError(f"Task: {task.get('task_id')}\n{task.get('task_error')}")
         return task
 
     def _send_request(

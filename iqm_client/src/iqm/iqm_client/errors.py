@@ -11,9 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-r"""
-This module contains error classes required by IQMClient.
-"""
+"""This module contains error classes required by IQMClient."""
 
 
 class ClientAuthenticationError(RuntimeError):
@@ -44,5 +42,5 @@ class JobAbortionError(RuntimeError):
     """Job abortion failed."""
 
 
-class ArchitectureRetrievalError(RuntimeError):
-    """Retrieving quantum architecture failed."""
+class EndpointRequestError(RuntimeError):
+    """Retrieving something from a server endpoint failed because we did not understand the response."""

@@ -12,16 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Client-side library for connecting to and executing quantum circuits on IQM quantum computers."""
-from importlib.metadata import PackageNotFoundError, version
-import sys
-import warnings
 
-from iqm.iqm_client.api import *
-from iqm.iqm_client.authentication import *
-from iqm.iqm_client.errors import *
-from iqm.iqm_client.iqm_client import *
-from iqm.iqm_client.models import *
-from iqm.iqm_client.transpile import *
+from importlib.metadata import PackageNotFoundError, version
+
+from iqm.iqm_client.api import *  # noqa: F403
+from iqm.iqm_client.authentication import *  # noqa: F403
+from iqm.iqm_client.errors import *  # noqa: F403
+from iqm.iqm_client.iqm_client import *  # noqa: F403
+from iqm.iqm_client.models import *  # noqa: F403
+from iqm.iqm_client.transpile import *  # noqa: F403
 
 try:
     DIST_NAME = "iqm-client"
@@ -30,6 +29,3 @@ except PackageNotFoundError:
     __version__ = "unknown"
 finally:
     del version, PackageNotFoundError
-
-if sys.version_info < (3, 11):
-    warnings.warn(DeprecationWarning("Python 3.10 will no longer be supported in a later release of IQM client."))

@@ -54,11 +54,11 @@ using third-party tools that do not support the MOVE gate.
 Given a :class:`DynamicQuantumArchitecture` for a Star architecture, the corresponding simplified
 version can be obtained using :func:`simplify_architecture`.
 """
+
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Sequence
 from enum import Enum
-from typing import Optional
 
 from iqm.iqm_client import (
     Circuit,
@@ -77,16 +77,17 @@ Resolution = tuple[str, str, str]
 
 class ExistingMoveHandlingOptions(str, Enum):
     """Options for how :func:`transpile_insert_moves` should handle existing MOVE instructions
-    in the circuit."""
+    in the circuit.
+    """
 
-    KEEP = 'keep'
+    KEEP = "keep"
     """Strict mode. The circuit, including existing MOVE instructions in it, is validated first.
     Then, any fictional two-qubit gates in the circuit are implemented with qubit-resonator gates."""
-    TRUST = 'trust'
+    TRUST = "trust"
     """Lenient mode. Same as KEEP, but does not validate the circuit first.
     Will attempt to fix any apparent user errors in the circuit by adding extra MOVE gates.
     """
-    REMOVE = 'remove'
+    REMOVE = "remove"
     """Removes existing MOVE instructions from the circuit using :func:`transpile_remove_moves`, and
     then does the same as TRUST. This may produce a more optimized end result."""
 
@@ -95,20 +96,22 @@ def _map_loci(
     instructions: Iterable[Instruction],
     qubit_mapping: dict[str, str],
     inverse: bool = False,
-) -> list[Instruction]:
+) -> tuple[Instruction, ...]:
     """Map the loci of the given instructions using the given qubit mapping, or its inverse.
 
     Args:
         instructions: Instructions whose loci are to be mapped.
         qubit_mapping: Mapping from one set of qubit names to another. Assumed to be injective.
         inverse: Invert ``qubit_mapping`` before using it.
+
     Returns:
         Copies of ``instructions`` with mapped loci.
+
     """
     if inverse:
         qubit_mapping = {phys: log for log, phys in qubit_mapping.items()}
-    return list(
-        inst.model_copy(update={'qubits': tuple(qubit_mapping[q] for q in inst.qubits)}) for inst in instructions
+    return tuple(
+        inst.model_copy(update={"qubits": tuple(qubit_mapping[q] for q in inst.qubits)}) for inst in instructions
     )
 
 
@@ -127,11 +130,12 @@ class _ResonatorStateTracker:
     Args:
         qr_gates: Mapping from qubit-resonator gate name to mapping from qubit to resonators with
             which it has the gate available.
+
     """
 
-    move_gate = 'move'
+    move_gate = "move"
     """Name of the MOVE gate in the architecture."""
-    qr_gate_names = frozenset(('move', 'cz'))
+    qr_gate_names = frozenset(("move", "cz"))
     """Names of all arity-2 gates that *can* (in principle) be applied on a (qubit, resonator) locus
     in the real Star architecture. They *may* also have (qubit, qubit) loci available if the architecture
     allows it.
@@ -142,11 +146,12 @@ class _ResonatorStateTracker:
         # in their effect, though not in implementation.
         for op in self.qr_gate_names:
             if op != self.move_gate and not _op_is_symmetric(op):
-                raise ValueError(f'QR gate {op} is not symmetric.')
+                raise ValueError(f"QR gate {op} is not symmetric.")
 
         def invert_locus_mapping(mapping: dict[str, set[str]]) -> dict[str, set[str]]:
             """Invert the give mapping of resonators to a list of connected qubits, returning
-            a mapping of qubits to connected resonators (or vice versa)."""
+            a mapping of qubits to connected resonators (or vice versa).
+            """
             inverse: dict[str, set[str]] = {}
             for r, qubits in mapping.items():
                 for q in qubits:
@@ -169,8 +174,10 @@ class _ResonatorStateTracker:
 
         Args:
             arch: Architecture that determines the available gate loci.
+
         Returns:
             Tracker for ``arch``.
+
         """
         resonators = set(arch.computational_resonators)
         qr_gates: dict[str, dict[str, set[str]]] = {}
@@ -181,10 +188,10 @@ class _ResonatorStateTracker:
                     if gate_name == cls.move_gate:
                         # MOVE must have a (q, r) locus
                         if q in resonators or r not in resonators:
-                            raise ValueError(f'MOVE gate locus {q, r} is not of the form (qubit, resonator)')
+                            raise ValueError(f"MOVE gate locus {q, r} is not of the form (qubit, resonator)")
                     elif q in resonators:
                         # Other QR gates
-                        raise ValueError(f'Gate {gate_name} locus {q, r} is not of the form (qubit, *)')
+                        raise ValueError(f"Gate {gate_name} locus {q, r} is not of the form (qubit, *)")
                     qr_loci.setdefault(q, set()).add(r)
                 qr_gates[gate_name] = qr_loci
         return cls(qr_gates)
@@ -197,8 +204,10 @@ class _ResonatorStateTracker:
 
         Args:
             circuit: The circuit to track the qubit states on.
+
         Returns:
             Tracker for the architecture inferred from ``circuit``.
+
         """
         return cls.from_instructions(circuit.instructions)
 
@@ -210,8 +219,10 @@ class _ResonatorStateTracker:
 
         Args:
             instructions: The instructions to track the qubit states on.
+
         Returns:
             Tracker for the architecture inferred from the given instructions.
+
         """
         qr_gates: dict[str, dict[str, set[str]]] = {}
         for i in instructions:
@@ -244,6 +255,7 @@ class _ResonatorStateTracker:
             CircuitTranspilationError: MOVE is not allowed, either because the resonator does not exist,
                 the MOVE gate is not available between this qubit-resonator pair, or the resonator is
                 currently holding the state of a different qubit.
+
         """
         if (
             resonator in self.resonators
@@ -252,7 +264,7 @@ class _ResonatorStateTracker:
         ):
             self.res_state_owner[resonator] = qubit if owner == resonator else resonator
         else:
-            raise CircuitTranspilationError(f'MOVE locus {qubit, resonator} is not allowed.')
+            raise CircuitTranspilationError(f"MOVE locus {qubit, resonator} is not allowed.")
 
     def create_move_instructions(
         self,
@@ -273,6 +285,7 @@ class _ResonatorStateTracker:
 
         Yields:
             1, 2 or 3 MOVE instructions.
+
         """
         # if the resonator has another qubit's state in it, restore it
         owner = self.res_state_owner[resonator]
@@ -294,9 +307,9 @@ class _ResonatorStateTracker:
         self.apply_move(*locus)
         yield Instruction(name=self.move_gate, qubits=locus, args={})
 
-    def reset_as_move_instructions(
+    def restore_as_move_instructions(
         self,
-        resonators: Optional[Iterable[str]] = None,
+        resonators: Iterable[str] | None = None,
     ) -> list[Instruction]:
         """MOVE instructions that move the states held in the given resonators back to their qubits.
 
@@ -309,6 +322,7 @@ class _ResonatorStateTracker:
         Returns:
             MOVE instructions needed to move the states out of ``resonators`` into
             the qubits they belong to.
+
         """
         if resonators is None:
             resonators = self.resonators
@@ -331,6 +345,7 @@ class _ResonatorStateTracker:
 
         Returns:
             Resonators that hold the state of one of ``qubits``.
+
         """
         # a resonator can only hold the state of a connected qubit, or its own state
         # TODO needs to be made more efficient once we have lots of resonators
@@ -348,6 +363,7 @@ class _ResonatorStateTracker:
 
         Returns:
             The mapped locus.
+
         """
         return tuple(self.res_state_owner.get(q, q) for q in locus)
 
@@ -357,13 +373,17 @@ class _ResonatorStateTracker:
         Given a fictional gate G acting on qubits (a, b), finds all resonators r for which the current DQA
         has either G(a, r) and MOVE(b, r), or G(b, r) and MOVE(a, r) available. See :mod:`~iqm.iqm_client.transpile`.
 
+        If ``inst`` is not a known QR gate, returns an empty list.
+
         Args:
             inst: Circuit instruction applying the fictional qubit-qubit gate G.
 
         Returns:
             All (gate qubit, move qubit, resonator) triples that can be used to implement ``inst``.
+
         """
-        gate_q2r = self.qr_gates_q2r[inst.name]
+        if (gate_q2r := self.qr_gates_q2r.get(inst.name)) is None:
+            return []
 
         def get_resonators(g: str, m: str) -> set[str]:
             """Resonators r for which we have G(g, r) and MOVE(m, r) available."""
@@ -374,7 +394,7 @@ class _ResonatorStateTracker:
         return [(a, b, r) for r in get_resonators(a, b)] + [(b, a, r) for r in get_resonators(b, a)]
 
     def find_best_resolution(self, inst: Instruction, lookahead: Iterable[Instruction]) -> Resolution | None:
-        """Find the best resolution for the fictional qubit-qubit gate ``inst``
+        """Find the best resolution for the fictional qubit-qubit gate instruction ``inst``
         using the available native qubit-resonator gates.
 
         Given a resolution (g, m, r) for ``inst``, it can be implemented as G(g, r) with
@@ -389,8 +409,8 @@ class _ResonatorStateTracker:
 
         Returns:
             Best resolution for implementing ``inst``, or None iff no resolution could be found.
+
         """
-        # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         resolutions = self.find_resolutions(inst)
         if not resolutions:
             return None
@@ -420,11 +440,69 @@ class _ResonatorStateTracker:
                 pass  # m qubit state already in r
             else:
                 if r_owner != r:
-                    badness += 1  # resonator has some other qubit's state in it, and must be reset
+                    badness += 1  # resonator has some other qubit's state in it, and it must be restored
                 if m_holder == m:
                     badness += 1  # need to move the m state to r
                 else:
                     badness += 2  # m state is in another resonator, need 2 moves to get it to r
+            return badness
+
+        def follower_badness(res: Resolution) -> int:
+            """Badness for implementing the follower instruction(s), starting from
+            the situation after implementing ``inst`` itself using ``res``.
+            """
+            g, m, r = res
+            g_follower = followers.get(g)
+            m_follower = followers.get(m)
+
+            if g_follower == m_follower and g_follower is not None:
+                # >=2q gate. 2q gate has the same or reversed locus (no matter since QR gates are assumed symmetric!)
+                if g_follower.name == inst.name:
+                    # same gate => same resolution works, free
+                    return 0
+                follower_resolutions = self.find_resolutions(g_follower)
+                if follower_resolutions:
+                    # different resolvable QR gate
+                    if res in follower_resolutions:
+                        # same resolution works, free
+                        return 0
+                    # same resolution not ok, find the cheapest one
+                    return min(get_badness(f_res, g, r, m) for f_res in follower_resolutions)
+                # not a resolvable QR gate, ignore
+                return 0
+
+            badness: int = 0
+            if g_follower:
+                follower_resolutions = self.find_resolutions(g_follower)
+                if follower_resolutions:
+                    # g_follower is a 2q gate (sharing g only) that we can resolve
+                    if any(f_res[2] != r for f_res in follower_resolutions):
+                        # follower can be implemented using a different resonator
+                        pass
+                    else:
+                        # follower needs to use same resonator but different move qubit
+                        badness += 2
+                else:
+                    # Not a resolvable QR gate. For 1q gates on g, qubit state is already there.
+                    pass
+
+            if m_follower:
+                follower_resolutions = self.find_resolutions(m_follower)
+                if follower_resolutions:
+                    # m_follower is a 2q gate (sharing m only) that we can resolve
+                    if any(f_res[1:] == (m, r) for f_res in follower_resolutions):
+                        # follower can be implemented using m as the move qubit and r as the resonator
+                        pass
+                    elif any(f_res[2] != r for f_res in follower_resolutions):
+                        # follower can be implemented using a different resonator, m state must be restored
+                        badness += 1
+                    else:
+                        # follower needs to use same resonator but different move qubit
+                        badness += 2
+                elif len(m_follower.qubits) == 1:
+                    # Not a resolvable QR gate. For 1q gates on m, state must be restored.
+                    badness += 1
+
             return badness
 
         options = []
@@ -432,7 +510,7 @@ class _ResonatorStateTracker:
             g, m, r = res
             # badness is the number of extra native instructions we need to implement ``inst``
             # and its followers using this resolution.
-            # implementing the gate itself, starting from the current tracker state
+            # implementing ``inst`` itself, starting from the current tracker state
             badness: int = get_badness(
                 res,
                 self.qubit_state_holder.get(g, g),
@@ -440,53 +518,8 @@ class _ResonatorStateTracker:
                 self.res_state_owner[r],
             )
 
-            # implementing the gate's followers, starting from the situation after implementing the gate itself
-            g_follower = followers.get(g)
-            m_follower = followers.get(m)
-            if g_follower == m_follower and g_follower is not None:
-                # 2q gate, same or reversed locus (does not matter since QR gates are assumed symmetric!)
-                if g_follower.name == inst.name:
-                    # same gate => same resolution works, free
-                    pass
-                else:
-                    # different gate
-                    follower_resolutions = self.find_resolutions(g_follower)
-                    if res in follower_resolutions:
-                        # same resolution works, free
-                        pass
-                    else:
-                        # same resolution not ok, find the cheapest one
-                        badness += min(get_badness(f_res, g, r, m) for f_res in follower_resolutions)
-            else:
-                if g_follower:
-                    if g_follower.name in self.qr_gates_q2r:
-                        # 2q gate sharing g only
-                        follower_resolutions = self.find_resolutions(g_follower)
-                        if any(f_res[2] != r for f_res in follower_resolutions):
-                            # follower can be implemented using a different resonator
-                            pass
-                        else:
-                            # follower needs to use same resonator but different move qubit
-                            badness += 2
-                    else:
-                        # 1q gate on g, state already there
-                        pass
-                if m_follower:
-                    if m_follower.name in self.qr_gates_q2r:
-                        # 2q gate sharing m only
-                        follower_resolutions = self.find_resolutions(m_follower)
-                        if any(f_res[1:] == (m, r) for f_res in follower_resolutions):
-                            # follower can be implemented using m as the move qubit and r as the resonator
-                            pass
-                        elif any(f_res[2] != r for f_res in follower_resolutions):
-                            # follower can be implemented using a different resonator, m state must be reset
-                            badness += 1
-                        else:
-                            # follower needs to use same resonator but different move qubit
-                            badness += 2
-                    else:
-                        # 1q gate on m, state must be restored
-                        badness += 1
+            # implementing the gate's followers, starting from the situation after implementing ``inst`` itself
+            badness += follower_badness(res)
 
             if badness == 0:
                 # badness cannot be lower than 0, so this is already an optimal resolution
@@ -508,8 +541,10 @@ class _ResonatorStateTracker:
         Args:
             resolution: Defines a native gate sequence for implementing ``inst``.
             inst: Fictional qubit-qubit gate as an instruction.
+
         Returns:
             Sequence of real qubit-resonator gates implementing ``inst``.
+
         """
         g, m, r = resolution
         seq: list[Instruction] = []
@@ -520,14 +555,14 @@ class _ResonatorStateTracker:
         # does g state need to be moved to g?
         g_holder = self.qubit_state_holder.get(g, g)
         if g_holder != g:
-            seq += self.reset_as_move_instructions([g_holder])
+            seq += self.restore_as_move_instructions([g_holder])
         # apply G(g, r)
-        seq.append(inst.model_copy(update={'qubits': (g, r)}))
+        seq.append(inst.model_copy(update={"qubits": (g, r)}))
         return seq
 
     def insert_moves(
         self,
-        instructions: list[Instruction],
+        instructions: Sequence[Instruction],
         arch: DynamicQuantumArchitecture,
     ) -> list[Instruction]:
         """Convert a simplified architecture circuit into a equivalent Star architecture circuit with
@@ -548,8 +583,8 @@ class _ResonatorStateTracker:
 
         Returns:
             Real Star architecture equivalent of ``circuit`` with MOVEs and resonators added.
+
         """
-        # pylint: disable=too-many-locals
         # This method can handle real single- and two-qubit gates, real q-r gates including MOVE,
         # and fictional two-qubit gates which it decomposes into real q-r gates.
         new_instructions: list[Instruction] = []
@@ -570,7 +605,7 @@ class _ResonatorStateTracker:
                 if res_match := self.resonators_holding_qubits(locus):
                     # Some locus qubits do not hold their states, which need to be restored before applying the gate.
                     # NOTE: as a consequence, a barrier closes a MOVE sandwich.
-                    new_instructions += self.reset_as_move_instructions(res_match)
+                    new_instructions += self.restore_as_move_instructions(res_match)
                 new_instructions.append(inst)
 
             except CircuitValidationError as e:
@@ -581,8 +616,8 @@ class _ResonatorStateTracker:
                 resolution = self.find_best_resolution(inst, instructions[idx + 1 :])
                 if resolution is None:
                     raise CircuitTranspilationError(
-                        f'Unable to find native gate sequence to enable fictional gate {inst.name} at {locus}.'
-                        ' Try routing the circuit to the simplified architecture first.'
+                        f"Unable to find native gate sequence to enable fictional gate {inst.name} at {locus}."
+                        " Try routing the circuit to the simplified architecture first."
                     ) from e
 
                 # implement G using the sequence
@@ -609,6 +644,7 @@ def simplify_architecture(
 
     Returns:
         equivalent quantum architecture with fictional gates
+
     """
     # NOTE: assumes all qubit-resonator gates have the locus order (q, r)
     if not arch.computational_resonators:
@@ -618,15 +654,13 @@ def simplify_architecture(
     q_set = frozenset(arch.qubits)
 
     moves: dict[str, set[str]] = {}  # maps resonator r to qubits q for which we have MOVE(q, r) available
-    for q, r in arch.gates['move'].loci if 'move' in arch.gates else []:
+    for q, r in arch.gates["move"].loci if "move" in arch.gates else []:
         if q not in q_set or r not in r_set:
-            raise ValueError(f'MOVE locus {q, r} is not of the form (qubit, resonator)')
+            raise ValueError(f"MOVE locus {q, r} is not of the form (qubit, resonator)")
         moves.setdefault(r, set()).add(q)
 
     def simplify_gate(gate_name: str, gate_info: GateInfo) -> GateInfo:
         """Convert the loci of the given gate"""
-        # pylint: disable=too-many-nested-blocks
-
         new_loci: dict[str, tuple[Locus, ...]] = {}  # mapping from implementation to its new loci
         # loci for fictional gates, a set because multiple resonators can produce the same fictional locus
         fictional_loci: set[Locus] = set()
@@ -650,15 +684,14 @@ def simplify_architecture(
                     else:
                         # does not involve a resonator, keep
                         kept_impl_loci.append(locus)
-                else:
-                    # other arities: keep as long as it does not involve a resonator
-                    if not set(locus) & r_set:
-                        kept_impl_loci.append(locus)
+                # other arities: keep as long as it does not involve a resonator
+                elif not set(locus) & r_set:
+                    kept_impl_loci.append(locus)
             new_loci[impl_name] = tuple(kept_impl_loci)
 
         # implementation info is lost in the simplification
         if fictional_loci:
-            new_loci['__fictional'] = tuple(fictional_loci)
+            new_loci["__fictional"] = tuple(fictional_loci)
 
         return GateInfo(
             implementations={impl_name: GateImplementationInfo(loci=loci) for impl_name, loci in new_loci.items()},
@@ -673,7 +706,7 @@ def simplify_architecture(
     # create fictional gates, remove real gate loci that involve a resonator
     new_gates: dict[str, GateInfo] = {}
     for gate_name, gate_info in arch.gates.items():
-        if gate_name == 'move':
+        if gate_name == "move":
             # MOVE gates do not have fictional versions
             if not remove_resonators:
                 # keep the gate_info as is
@@ -694,7 +727,7 @@ def transpile_insert_moves(
     arch: DynamicQuantumArchitecture,
     *,
     existing_moves: ExistingMoveHandlingOptions = ExistingMoveHandlingOptions.KEEP,
-    qubit_mapping: Optional[dict[str, str]] = None,
+    qubit_mapping: dict[str, str] | None = None,
     restore_states: bool = True,
 ) -> Circuit:
     """Convert a simplified architecture circuit into an equivalent Star architecture circuit with
@@ -722,6 +755,7 @@ def transpile_insert_moves(
 
     Returns:
         Equivalent Star architecture circuit with MOVEs and resonators added.
+
     """
     move_gate = _ResonatorStateTracker.move_gate
 
@@ -730,7 +764,7 @@ def transpile_insert_moves(
     # can we use MOVEs?
     if move_gate not in arch.gates:
         if circuit_has_moves:
-            raise ValueError('Circuit contains MOVE instructions, but the architecture does not support them.')
+            raise ValueError("Circuit contains MOVE instructions, but the architecture does not support them.")
         # nothing to do (do not validate the circuit)
         return circuit
 
@@ -764,11 +798,14 @@ def transpile_insert_moves(
     new_instructions = tracker.insert_moves(phys_instructions, arch)
 
     if restore_states:
-        new_instructions += tracker.reset_as_move_instructions()
+        new_instructions += tracker.restore_as_move_instructions()
 
     # convert back to logical qubit names
-    new_instructions = _map_loci(new_instructions, qubit_mapping, inverse=True)
-    return Circuit(name=circuit.name, instructions=new_instructions, metadata=circuit.metadata)
+    return Circuit(
+        name=circuit.name,
+        instructions=_map_loci(new_instructions, qubit_mapping, inverse=True),
+        metadata=circuit.metadata,
+    )
 
 
 def transpile_remove_moves(circuit: Circuit) -> Circuit:
@@ -798,4 +835,4 @@ def transpile_remove_moves(circuit: Circuit) -> Circuit:
             new_instructions.append(
                 Instruction(name=inst.name, implementation=inst.implementation, qubits=new_qubits, args=inst.args)
             )
-    return Circuit(name=circuit.name, instructions=new_instructions, metadata=circuit.metadata)
+    return Circuit(name=circuit.name, instructions=tuple(new_instructions), metadata=circuit.metadata)

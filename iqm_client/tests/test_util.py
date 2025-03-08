@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Tests for the IQM client utilities."""
-import numpy as np
-import pytest
 
 from iqm.iqm_client.util import to_json_dict
+import numpy as np
+import pytest
 
 
 def test_serialize_dict():
