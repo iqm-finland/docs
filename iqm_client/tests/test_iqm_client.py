@@ -12,21 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Tests for the IQM client."""
-# pylint: disable=too-many-arguments,too-many-lines
+
 from importlib.metadata import version
 import re
+import time
 import uuid
-
-from mockito import ANY, expect, unstub, verifyNoUnwantedInteractions, when
-from packaging.version import parse
-import pytest
-import requests
-from requests import HTTPError
 
 from iqm.iqm_client import (
     APIEndpoint,
     APIVariant,
-    ArchitectureRetrievalError,
+    CalibrationSet,
     Circuit,
     CircuitCompilationOptions,
     CircuitExecutionError,
@@ -36,16 +31,24 @@ from iqm.iqm_client import (
     DDMode,
     DDStrategy,
     DynamicQuantumArchitecture,
+    EndpointRequestError,
     HeraldingMode,
     Instruction,
     IQMClient,
     JobAbortionError,
+    QualityMetricSet,
     QuantumArchitectureSpecification,
     SingleQubitMapping,
     Status,
     serialize_qubit_mapping,
     validate_circuit,
 )
+from mockito import ANY, expect, unstub, verifyNoUnwantedInteractions, when
+from packaging.version import parse
+import pytest
+import requests
+from requests import HTTPError
+
 from tests.conftest import (
     MockJsonResponse,
     get_jobs_args,
@@ -59,70 +62,70 @@ from tests.conftest import (
 def move_circuit():
     instructions = (
         Instruction(
-            name='prx',
-            qubits=('QB1',),
-            args={'phase_t': 0.3, 'angle_t': -0.2},
+            name="prx",
+            qubits=("QB1",),
+            args={"phase_t": 0.3, "angle_t": -0.2},
         ),
         Instruction(
-            name='move',
-            qubits=('QB3', 'CR1'),
+            name="move",
+            qubits=("QB3", "CR1"),
             args={},
         ),
         Instruction(
-            name='cz',
-            qubits=('QB1', 'CR1'),
+            name="cz",
+            qubits=("QB1", "CR1"),
             args={},
         ),
         Instruction(
-            name='cz',
-            qubits=('QB2', 'CR1'),
+            name="cz",
+            qubits=("QB2", "CR1"),
             args={},
         ),
         Instruction(
-            name='move',
-            qubits=('QB3', 'CR1'),
+            name="move",
+            qubits=("QB3", "CR1"),
             args={},
         ),
     )
-    return Circuit(name='CR1 circuit', instructions=instructions)
+    return Circuit(name="CR1 circuit", instructions=instructions)
 
 
 @pytest.fixture
 def move_circuit_with_prx_in_the_sandwich():
     instructions = (
         Instruction(
-            name='prx',
-            qubits=('QB1',),
-            args={'phase_t': 0.3, 'angle_t': -0.2},
+            name="prx",
+            qubits=("QB1",),
+            args={"phase_t": 0.3, "angle_t": -0.2},
         ),
         Instruction(
-            name='move',
-            qubits=('QB3', 'CR1'),
+            name="move",
+            qubits=("QB3", "CR1"),
             args={},
         ),
         Instruction(
-            name='prx',
-            qubits=('QB3',),
-            args={'phase_t': 0.3, 'angle_t': -0.2},
+            name="prx",
+            qubits=("QB3",),
+            args={"phase_t": 0.3, "angle_t": -0.2},
         ),
         Instruction(
-            name='move',
-            qubits=('QB3', 'CR1'),
+            name="move",
+            qubits=("QB3", "CR1"),
             args={},
         ),
     )
-    return Circuit(name='CR1 circuit with PRX in the sandwich', instructions=instructions)
+    return Circuit(name="CR1 circuit with PRX in the sandwich", instructions=instructions)
 
 
 def test_serialize_qubit_mapping():
     """
     Tests that serialize_qubit_mapping returns a list of SingleQubitMapping objects
     """
-    qm_dict = {'Alice': 'QB1', 'Bob': 'qubit_3', 'Charlie': 'physical 0'}
+    qm_dict = {"Alice": "QB1", "Bob": "qubit_3", "Charlie": "physical 0"}
     assert serialize_qubit_mapping(qm_dict) == [
-        SingleQubitMapping(logical_name='Alice', physical_name='QB1'),
-        SingleQubitMapping(logical_name='Bob', physical_name='qubit_3'),
-        SingleQubitMapping(logical_name='Charlie', physical_name='physical 0'),
+        SingleQubitMapping(logical_name="Alice", physical_name="QB1"),
+        SingleQubitMapping(logical_name="Bob", physical_name="qubit_3"),
+        SingleQubitMapping(logical_name="Charlie", physical_name="physical 0"),
     ]
 
 
@@ -164,38 +167,38 @@ def test_submit_circuits_adds_user_agent_with_client_signature(
 
 
 @pytest.mark.parametrize(
-    'run_request_name, valid_request, error',
+    "run_request_name, valid_request, error",
     [
-        ('minimal_run_request', True, None),
-        ('run_request_with_heralding', True, None),
-        ('run_request_with_custom_settings', True, None),
+        ("minimal_run_request", True, None),
+        ("run_request_with_heralding", True, None),
+        ("run_request_with_custom_settings", True, None),
         (
-            'run_request_with_invalid_qubit_mapping',
+            "run_request_with_invalid_qubit_mapping",
             False,
-            CircuitValidationError('Multiple logical qubits map to the same physical qubit.'),
+            CircuitValidationError("Multiple logical qubits map to the same physical qubit."),
         ),
         (
-            'run_request_with_incomplete_qubit_mapping',
+            "run_request_with_incomplete_qubit_mapping",
             False,
             CircuitValidationError(
                 "The qubits {'Qubit B'} in circuit 'The circuit' "
-                'at index 0 are not found in the provided qubit mapping.'
+                "at index 0 are not found in the provided qubit mapping."
             ),
         ),
-        ('run_request_without_qubit_mapping', True, None),
-        ('run_request_with_calibration_set_id', True, None),
-        ('run_request_with_duration_check_disabled', True, None),
+        ("run_request_without_qubit_mapping", True, None),
+        ("run_request_with_calibration_set_id", True, None),
+        ("run_request_with_duration_check_disabled", True, None),
         (
-            'run_request_with_incompatible_options',
+            "run_request_with_incompatible_options",
             False,
             ValueError(
-                'Unable to perform full MOVE gate frame tracking if MOVE gate validation '
+                "Unable to perform full MOVE gate frame tracking if MOVE gate validation "
                 'is not "strict" or "allow_prx".'
             ),
         ),
     ],
 )
-def test_submit_circuits_returns_id(
+def test_submit_circuits_returns_id(  # noqa: PLR0913
     sample_client,
     jobs_url,
     run_request_name,
@@ -210,9 +213,9 @@ def test_submit_circuits_returns_id(
     Tests submitting circuits for execution
     """
     run_request = request.getfixturevalue(run_request_name)
-    calibration_set_id = uuid.UUID('ec6f6478-a99b-4e75-8a94-2f9cb0511bce')
+    calibration_set_id = uuid.UUID("ec6f6478-a99b-4e75-8a94-2f9cb0511bce")
     run_request.calibration_set_id = calibration_set_id
-    dynamic_architecture_success.json_data['calibration_set_id'] = calibration_set_id
+    dynamic_architecture_success.json_data["calibration_set_id"] = calibration_set_id
     when(requests).get(sample_client._api.url(APIEndpoint.CALIBRATED_GATES, str(calibration_set_id)), ...).thenReturn(
         dynamic_architecture_success
     )
@@ -236,7 +239,7 @@ def test_submit_circuits_does_not_activate_heralding_by_default(
     Test submitting run request without heralding
     """
     # Expect request to have heralding mode NONE by default
-    assert post_jobs_args(minimal_run_request)['json']['heralding_mode'] == HeraldingMode.NONE.value
+    assert post_jobs_args(minimal_run_request)["json"]["heralding_mode"] == HeraldingMode.NONE.value
     expect(requests, times=1).post(jobs_url, **post_jobs_args(minimal_run_request)).thenReturn(submit_success)
     when(requests).get(dynamic_architecture_url, ...).thenReturn(dynamic_architecture_success)
 
@@ -254,7 +257,7 @@ def test_submit_circuits_does_not_activate_dd_by_default(
     Test submitting run request without dynamical decoupling
     """
     # Expect request to have dynamical decoupling mode DISABLED by default
-    assert post_jobs_args(minimal_run_request)['json']['dd_mode'] == DDMode.DISABLED.value
+    assert post_jobs_args(minimal_run_request)["json"]["dd_mode"] == DDMode.DISABLED.value
 
     expect(requests, times=1).post(jobs_url, **post_jobs_args(minimal_run_request)).thenReturn(submit_success)
     when(requests).get(dynamic_architecture_url, ...).thenReturn(dynamic_architecture_success)
@@ -271,8 +274,8 @@ def test_submit_circuits_raises_with_invalid_shots(sample_client, minimal_run_re
     Test that submitting run request with invalid number of shots raises ValueError
     """
     args = submit_circuits_args(minimal_run_request)
-    args['shots'] = 0
-    with pytest.raises(ValueError, match='Number of shots must be greater than zero.'):
+    args["shots"] = 0
+    with pytest.raises(ValueError, match="Number of shots must be greater than zero."):
         sample_client.submit_circuits(**args)
 
 
@@ -289,11 +292,11 @@ def test_submit_circuits_sets_heralding_mode_in_run_request(
     """
     # Expect heralding mode to be the same as in run request
     expected_heralding_mode = run_request_with_heralding.heralding_mode.value
-    assert post_jobs_args(run_request_with_heralding)['json']['heralding_mode'] == expected_heralding_mode
+    assert post_jobs_args(run_request_with_heralding)["json"]["heralding_mode"] == expected_heralding_mode
     expect(requests, times=1).post(jobs_url, **post_jobs_args(run_request_with_heralding)).thenReturn(submit_success)
     expect(requests, times=1).get(dynamic_architecture_url, ...).thenReturn(dynamic_architecture_success)
 
-    assert submit_circuits_args(run_request_with_heralding)['options'].heralding_mode == expected_heralding_mode
+    assert submit_circuits_args(run_request_with_heralding)["options"].heralding_mode == expected_heralding_mode
     sample_client.submit_circuits(**submit_circuits_args(run_request_with_heralding))
 
     verifyNoUnwantedInteractions()
@@ -315,13 +318,13 @@ def test_submit_circuits_sets_dd_mode_in_run_request(
     expected_dd_mode = run_request_with_dd.dd_mode.value
     expected_dd_strategy = run_request_with_dd.dd_strategy
 
-    assert post_jobs_args(run_request_with_dd)['json']['dd_mode'] == expected_dd_mode
-    assert DDStrategy(**post_jobs_args(run_request_with_dd)['json']['dd_strategy']) == expected_dd_strategy
+    assert post_jobs_args(run_request_with_dd)["json"]["dd_mode"] == expected_dd_mode
+    assert DDStrategy(**post_jobs_args(run_request_with_dd)["json"]["dd_strategy"]) == expected_dd_strategy
     expect(requests, times=1).post(jobs_url, **post_jobs_args(run_request_with_dd)).thenReturn(submit_success)
     expect(requests, times=1).get(dynamic_architecture_url, ...).thenReturn(dynamic_architecture_success)
 
-    assert submit_circuits_args(run_request_with_dd)['options'].dd_mode == expected_dd_mode
-    assert submit_circuits_args(run_request_with_dd)['options'].dd_strategy == expected_dd_strategy
+    assert submit_circuits_args(run_request_with_dd)["options"].dd_mode == expected_dd_mode
+    assert submit_circuits_args(run_request_with_dd)["options"].dd_strategy == expected_dd_strategy
     sample_client.submit_circuits(**submit_circuits_args(run_request_with_dd))
 
     verifyNoUnwantedInteractions()
@@ -338,9 +341,9 @@ def test_submit_circuits_gets_architecture_once(
     """
     Test that dynamic quantum architecture is only requested once from the QC when calset id is specified
     """
-    calibration_set_id = uuid.UUID('ec6f6478-a99b-4e75-8a94-2f9cb0511bce')
+    calibration_set_id = uuid.UUID("ec6f6478-a99b-4e75-8a94-2f9cb0511bce")
     minimal_run_request.calibration_set_id = calibration_set_id
-    dynamic_architecture_success.json_data['calibration_set_id'] = calibration_set_id
+    dynamic_architecture_success.json_data["calibration_set_id"] = calibration_set_id
     expect(requests, times=1).get(
         sample_client._api.url(APIEndpoint.CALIBRATED_GATES, str(calibration_set_id)), ...
     ).thenReturn(dynamic_architecture_success)
@@ -363,7 +366,7 @@ def test_submit_circuits_raises_with_invalid_heralding_mode(
     when(requests).get(dynamic_architecture_url, ...).thenReturn(dynamic_architecture_success)
     with pytest.raises(ValueError, match="Input should be 'none' or 'zeros'"):
         sample_client.submit_circuits(
-            circuits=[], shots=10, options=CircuitCompilationOptions(heralding_mode='invalid')
+            circuits=[], shots=10, options=CircuitCompilationOptions(heralding_mode="invalid")
         )
 
 
@@ -405,7 +408,7 @@ def test_get_run_adds_user_agent_with_client_signature(
     unstub()
 
 
-def test_get_run_status_and_results_for_existing_run(
+def test_get_run_status_and_results_for_existing_run(  # noqa: PLR0913
     sample_client,
     existing_job_url,
     sample_circuit_metadata,
@@ -424,9 +427,7 @@ def test_get_run_status_and_results_for_existing_run(
         pending_compilation_job_result
     ).thenReturn(pending_execution_job_result).thenReturn(ready_job_result).thenReturn(
         pending_deletion_job_result
-    ).thenReturn(
-        deleted_job_result
-    )
+    ).thenReturn(deleted_job_result)
 
     # First request gets status 'pending compilation'
     assert sample_client.get_run(existing_run_id).status == Status.PENDING_COMPILATION
@@ -493,8 +494,8 @@ def test_get_run_status_and_results_for_missing_run(sample_client, jobs_url, mis
     """
     Tests getting a task that was not created
     """
-    expect(requests, times=1).get(f'{jobs_url}/{missing_run_id}', **get_jobs_args()).thenReturn(
-        MockJsonResponse(404, {'detail': 'not found'})
+    expect(requests, times=1).get(f"{jobs_url}/{missing_run_id}", **get_jobs_args()).thenReturn(
+        MockJsonResponse(404, {"detail": "not found"})
     )
 
     with pytest.raises(HTTPError) as e:
@@ -509,8 +510,8 @@ def test_get_run_status_for_missing_run(sample_client, jobs_url, missing_run_id)
     """
     Tests getting a task that was not created
     """
-    expect(requests, times=1).get(f'{jobs_url}/{missing_run_id}/status', **get_jobs_args()).thenReturn(
-        MockJsonResponse(404, {'detail': 'not found'})
+    expect(requests, times=1).get(f"{jobs_url}/{missing_run_id}/status", **get_jobs_args()).thenReturn(
+        MockJsonResponse(404, {"detail": "not found"})
     )
 
     with pytest.raises(HTTPError) as e:
@@ -537,6 +538,7 @@ def test_waiting_for_compilation(
         pending_compilation_status
     ).thenReturn(pending_compilation_status).thenReturn(pending_execution_status)
     expect(requests, times=1).get(existing_job_url, **get_jobs_args()).thenReturn(pending_execution_job_result)
+    expect(time, times=2).sleep(...).thenReturn()  # skip sleeps to speed up the test
 
     assert sample_client.wait_for_compilation(existing_run_id).status == Status.PENDING_EXECUTION
 
@@ -564,6 +566,7 @@ def test_wait_for_compilation_adds_user_agent_with_signature(
     expect(requests, times=1).get(
         existing_job_url, **get_jobs_args(user_agent=client_with_signature._signature)
     ).thenReturn(pending_execution_job_result)
+    expect(time, times=2).sleep(...).thenReturn()  # skip sleeps to speed up the test
 
     assert client_with_signature.wait_for_compilation(existing_run_id).status == Status.PENDING_EXECUTION
 
@@ -588,6 +591,7 @@ def test_waiting_for_results(
         pending_compilation_status
     ).thenReturn(pending_execution_status).thenReturn(ready_status)
     expect(requests, times=1).get(existing_job_url, **get_jobs_args()).thenReturn(ready_job_result)
+    expect(time, times=2).sleep(...).thenReturn()  # skip sleeps to speed up the test
 
     assert sample_client.wait_for_results(existing_run_id).status == Status.READY
 
@@ -595,7 +599,7 @@ def test_waiting_for_results(
     unstub()
 
 
-def test_wait_for_results_adds_user_agent_with_signature(
+def test_wait_for_results_adds_user_agent_with_signature(  # noqa: PLR0913
     client_with_signature,
     client_signature,
     existing_job_status_url,
@@ -616,6 +620,7 @@ def test_wait_for_results_adds_user_agent_with_signature(
     expect(requests, times=1).get(
         existing_job_url, **get_jobs_args(user_agent=client_with_signature._signature)
     ).thenReturn(ready_job_result)
+    expect(time, times=2).sleep(...).thenReturn()  # skip sleeps to speed up the test
 
     assert client_with_signature.wait_for_results(existing_run_id).status == Status.READY
 
@@ -630,8 +635,76 @@ def test_get_quantum_architecture(
     expect(requests, times=1).get(quantum_architecture_url, ...).thenReturn(static_architecture_success)
 
     assert sample_client.get_quantum_architecture() == QuantumArchitectureSpecification(
-        **sample_static_architecture['quantum_architecture']
+        **sample_static_architecture["quantum_architecture"]
     )
+
+    verifyNoUnwantedInteractions()
+    unstub()
+
+
+def test_get_quality_metric_set_with_calset_id(
+    sample_client, base_url, sample_quality_metric_set, quality_metric_set_success
+):
+    """Tests that the correct quality metric set for the given ``calibration_set_id`` is returned."""
+    calset_id = sample_quality_metric_set["calibration_set_id"]
+    expect(requests, times=1).get(f"{base_url}/calibration/metrics/{calset_id}", ...).thenReturn(
+        quality_metric_set_success
+    )
+
+    assert sample_client.get_quality_metric_set(calset_id) == QualityMetricSet(**sample_quality_metric_set)
+
+    verifyNoUnwantedInteractions()
+    unstub()
+
+
+def test_get_quality_metric_set_without_calset_id(
+    sample_client, base_url, sample_quality_metric_set, quality_metric_set_success
+):
+    """Tests that the default quality metric set is returned when no ``calibration_set_id`` is provided."""
+    expect(requests, times=1).get(f"{base_url}/calibration/metrics/default", ...).thenReturn(quality_metric_set_success)
+    assert sample_client.get_quality_metric_set() == QualityMetricSet(**sample_quality_metric_set)
+    verifyNoUnwantedInteractions()
+    unstub()
+
+
+def test_get_quality_metric_set_v2_with_calset_id(
+    sample_client_v2, quality_metric_set_url_v2, sample_quality_metric_set, quality_metric_set_success
+):
+    """Test retrieving the quality metric set using the control station api version (v2)"""
+    expect(requests, times=1).get(quality_metric_set_url_v2, ...).thenReturn(quality_metric_set_success)
+
+    assert sample_client_v2.get_quality_metric_set() == QualityMetricSet(**sample_quality_metric_set)
+
+    verifyNoUnwantedInteractions()
+    unstub()
+
+
+def test_get_calibration_set_with_calset_id(sample_client, base_url, sample_calibration_set, calibration_set_success):
+    """Tests that the correct calibration set for the given ``calibration_set_id`` is returned."""
+    calset_id = sample_calibration_set["calibration_set_id"]
+    expect(requests, times=1).get(f"{base_url}/api/v1/calibration/{calset_id}", ...).thenReturn(calibration_set_success)
+    assert sample_client.get_calibration_set(calset_id) == CalibrationSet(**sample_calibration_set)
+    verifyNoUnwantedInteractions()
+    unstub()
+
+
+def test_get_calibration_set_without_calset_id(
+    sample_client, base_url, sample_calibration_set, calibration_set_success
+):
+    """Tests that the correct calibration set for the default calibration set is returned."""
+    expect(requests, times=1).get(f"{base_url}/api/v1/calibration/default", ...).thenReturn(calibration_set_success)
+    assert sample_client.get_calibration_set() == CalibrationSet(**sample_calibration_set)
+    verifyNoUnwantedInteractions()
+    unstub()
+
+
+def test_get_calibration_set_v2(
+    sample_client_v2, calibration_set_url_v2, sample_calibration_set, calibration_set_success
+):
+    """Test retrieving the calibration set."""
+    expect(requests, times=1).get(calibration_set_url_v2, ...).thenReturn(calibration_set_success)
+
+    assert sample_client_v2.get_calibration_set() == CalibrationSet(**sample_calibration_set)
 
     verifyNoUnwantedInteractions()
     unstub()
@@ -639,14 +712,14 @@ def test_get_quantum_architecture(
 
 def test_get_feedback_groups(base_url, channel_properties_url, channel_properties_success, static_architecture_success):
     """Test retrieving the feedback groups."""
-    when(requests).get(f'{base_url}/info/client-libraries', headers=ANY, timeout=ANY).thenReturn(
+    when(requests).get(f"{base_url}/info/client-libraries", headers=ANY, timeout=ANY).thenReturn(
         mock_supported_client_libraries_response()
     )
-    expect(requests, times=1).get(f'{base_url}/cocos/quantum-architecture', ...).thenReturn(static_architecture_success)
+    expect(requests, times=1).get(f"{base_url}/cocos/quantum-architecture", ...).thenReturn(static_architecture_success)
     iqm_client = IQMClient(base_url, api_variant=APIVariant.V2)
     expect(requests, times=1).get(channel_properties_url, ...).thenReturn(channel_properties_success)
 
-    assert iqm_client.get_feedback_groups() == (frozenset({'QB1', 'QB2'}), frozenset({'QB3'}))
+    assert iqm_client.get_feedback_groups() == (frozenset({"QB1", "QB2"}), frozenset({"QB3"}))
 
     verifyNoUnwantedInteractions()
     unstub()
@@ -658,7 +731,7 @@ def test_user_warning_is_emitted_when_warnings_in_response(
     """Test that a warning is emitted when warnings are present in the response"""
     expect(requests, times=1).get(existing_job_url, ...).thenReturn(job_result_with_warnings)
 
-    expected_message = job_result_with_warnings.json()['warnings'][0]
+    expected_message = job_result_with_warnings.json()["warnings"][0]
     with pytest.warns(UserWarning, match=expected_message):
         sample_client.get_run(existing_run_id)
 
@@ -668,10 +741,10 @@ def test_user_warning_is_emitted_when_warnings_in_response(
 
 def test_base_url_is_invalid():
     """Test that an exception is raised when the base URL is invalid"""
-    invalid_base_url = 'xyz://example.com'
+    invalid_base_url = "xyz://example.com"
     with pytest.raises(ClientConfigurationError) as exc:
         IQMClient(invalid_base_url)
-    assert f'The URL schema has to be http or https. Incorrect schema in URL: {invalid_base_url}' == str(exc.value)
+    assert f"The URL schema has to be http or https. Incorrect schema in URL: {invalid_base_url}" == str(exc.value)
 
 
 def test_run_result_throws_json_decode_error_if_received_not_json(
@@ -680,34 +753,8 @@ def test_run_result_throws_json_decode_error_if_received_not_json(
     """Test that an exception is raised when the response is not a valid JSON"""
     expect(requests, times=1).get(existing_job_url, ...).thenReturn(not_valid_json_response)
 
-    with pytest.raises(CircuitExecutionError):
+    with pytest.raises(EndpointRequestError, match="Invalid response"):
         sample_client.get_run(existing_run_id)
-
-    verifyNoUnwantedInteractions()
-    unstub()
-
-
-def test_run_result_status_throws_json_decode_error_if_received_not_json(
-    sample_client, existing_job_status_url, existing_run_id, not_valid_json_response
-):
-    """Test that an exception is raised when the response is not a valid JSON"""
-    expect(requests, times=1).get(existing_job_status_url, ...).thenReturn(not_valid_json_response)
-
-    with pytest.raises(CircuitExecutionError):
-        sample_client.get_run_status(existing_run_id)
-
-    verifyNoUnwantedInteractions()
-    unstub()
-
-
-def test_quantum_architecture_throws_json_decode_error_if_received_not_json(
-    sample_client, quantum_architecture_url, not_valid_json_response
-):
-    """Test that an exception is raised when the response is not a valid JSON"""
-    expect(requests, times=1).get(quantum_architecture_url, ...).thenReturn(not_valid_json_response)
-
-    with pytest.raises(ArchitectureRetrievalError):
-        sample_client.get_quantum_architecture()
 
     verifyNoUnwantedInteractions()
     unstub()
@@ -751,8 +798,8 @@ def test_submit_circuits_validates_circuits(sample_client, sample_circuit):
     before submitting them for execution
     """
     invalid_circuit = sample_circuit.model_copy()
-    invalid_circuit.name = ''  # Invalidate the circuit on purpose
-    with pytest.raises(CircuitValidationError, match='The circuit at index 1 failed the validation'):
+    invalid_circuit.name = ""  # Invalidate the circuit on purpose
+    with pytest.raises(CircuitValidationError, match="The circuit at index 1 failed the validation"):
         sample_client.submit_circuits(circuits=[sample_circuit, invalid_circuit], shots=10)
 
 
@@ -771,8 +818,8 @@ def test_validate_circuit_detects_circuit_name_is_empty_string(sample_circuit):
     catches empty name of a circuit
     """
     circuit = sample_circuit.model_copy()
-    circuit.name = ''
-    with pytest.raises(ValueError, match='A circuit should have a non-empty string for a name'):
+    circuit.name = ""
+    with pytest.raises(ValueError, match="A circuit should have a non-empty string for a name"):
         validate_circuit(circuit)
 
 
@@ -783,7 +830,7 @@ def test_validate_circuit_checks_circuit_has_at_least_one_instruction(sample_cir
     """
     circuit = sample_circuit.model_copy()
     circuit.instructions = tuple()
-    with pytest.raises(ValueError, match='Each circuit should have at least one instruction'):
+    with pytest.raises(ValueError, match="Each circuit should have at least one instruction"):
         validate_circuit(circuit)
 
 
@@ -793,7 +840,7 @@ def test_validate_circuit_checks_instruction_name_is_supported(sample_circuit):
     catches when instruction name is set to an unknown instruction type
     """
     circuit = sample_circuit.model_copy()
-    circuit.instructions[0].name = 'kaboom'
+    circuit.instructions[0].name = "kaboom"
     with pytest.raises(ValueError, match='Unknown operation "kaboom"'):
         validate_circuit(circuit)
 
@@ -804,8 +851,8 @@ def test_validate_circuit_checks_instruction_implementation_is_string(sample_cir
     catches when instruction implementation is set to an empty string
     """
     circuit = sample_circuit.model_copy()
-    circuit.instructions[0].implementation = ''
-    with pytest.raises(ValueError, match='Implementation of the instruction should be None, or a non-empty string'):
+    circuit.instructions[0].implementation = ""
+    with pytest.raises(ValueError, match="Implementation of the instruction should be None, or a non-empty string"):
         validate_circuit(circuit)
 
 
@@ -816,7 +863,7 @@ def test_validate_circuit_checks_instruction_qubit_count(sample_circuit):
     that instruction
     """
     circuit = sample_circuit.model_copy()
-    circuit.instructions[0].qubits += ('Qubit C',)
+    circuit.instructions[0].qubits += ("Qubit C",)
     with pytest.raises(ValueError, match=r'The "cz" operation acts on 2 qubit\(s\), but 3 were given'):
         validate_circuit(circuit)
 
@@ -827,7 +874,7 @@ def test_validate_circuit_extra_arguments(sample_circuit):
     catches when submitted argument names of the instruction are not supported
     """
     circuit = sample_circuit.model_copy()
-    circuit.instructions[1].args['arg_x'] = 'This argument name is not supported by the operation'
+    circuit.instructions[1].args["arg_x"] = "This argument name is not supported by the operation"
     with pytest.raises(ValueError, match='The operation "prx" allows'):
         validate_circuit(circuit)
 
@@ -839,12 +886,12 @@ def test_validate_circuit_missing_arguments():
     """
     with pytest.raises(ValueError, match='The operation "prx" requires'):
         Circuit(
-            name='The circuit',
+            name="The circuit",
             instructions=[
                 Instruction(
-                    name='prx',
-                    qubits=('QB1',),
-                    args={'phase_t': 0.3},
+                    name="prx",
+                    qubits=("QB1",),
+                    args={"phase_t": 0.3},
                 ),
             ],
         )
@@ -856,7 +903,7 @@ def test_validate_circuit_checks_instruction_argument_types(sample_circuit):
     catches when submitted argument types of the instruction are not supported
     """
     circuit = sample_circuit.model_copy()
-    circuit.instructions[1].args['phase_t'] = '0.7'
+    circuit.instructions[1].args["phase_t"] = "0.7"
     with pytest.raises(TypeError, match='The argument "phase_t" should be of one of the following supported types'):
         validate_circuit(circuit)
 
@@ -874,7 +921,7 @@ def test_abort_job_successful(sample_client, existing_job_url, existing_run_id, 
     """
     Tests aborting a job
     """
-    expect(requests, times=1).post(f'{existing_job_url}/abort', **post_jobs_args()).thenReturn(abort_job_success)
+    expect(requests, times=1).post(f"{existing_job_url}/abort", **post_jobs_args()).thenReturn(abort_job_success)
 
     sample_client.abort_job(existing_run_id)
 
@@ -882,14 +929,14 @@ def test_abort_job_successful(sample_client, existing_job_url, existing_run_id, 
     unstub()
 
 
-@pytest.mark.parametrize('status_code', [404, 409])
+@pytest.mark.parametrize("status_code", [404, 409])
 def test_abort_job_failed(status_code, sample_client, existing_job_url, existing_run_id, abort_job_failed):
     """
     Tests aborting a job raises JobAbortionError if server returned error response
     """
     response = abort_job_failed
     response.status_code = status_code
-    expect(requests, times=1).post(f'{existing_job_url}/abort', **post_jobs_args()).thenReturn(response)
+    expect(requests, times=1).post(f"{existing_job_url}/abort", **post_jobs_args()).thenReturn(response)
 
     with pytest.raises(JobAbortionError):
         sample_client.abort_job(existing_run_id)
@@ -899,14 +946,14 @@ def test_abort_job_failed(status_code, sample_client, existing_job_url, existing
 
 
 @pytest.mark.parametrize(
-    'params',
+    "params",
     [
         {},
-        {'options': CircuitCompilationOptions(heralding_mode=HeraldingMode.ZEROS, active_reset_cycles=1)},
-        {'custom_settings': {'some_setting': 1}},
-        {'calibration_set_id': uuid.uuid4()},
-        {'options': CircuitCompilationOptions(max_circuit_duration_over_t2=0.0)},
-        {'qubit_mapping': {'QB1': 'QB2', 'QB2': 'QB1'}},
+        {"options": CircuitCompilationOptions(heralding_mode=HeraldingMode.ZEROS, active_reset_cycles=1)},
+        {"custom_settings": {"some_setting": 1}},
+        {"calibration_set_id": uuid.uuid4()},
+        {"options": CircuitCompilationOptions(max_circuit_duration_over_t2=0.0)},
+        {"qubit_mapping": {"QB1": "QB2", "QB2": "QB1"}},
     ],
 )
 def test_create_and_submit_run_request(
@@ -922,16 +969,16 @@ def test_create_and_submit_run_request(
     """
     Tests that calling create_run_request and then submit_run_request is equivalent to calling submit_circuits.
     """
-    if 'calibration_set_id' in params:
+    if "calibration_set_id" in params:
         when(requests).get(
-            sample_client._api.url(APIEndpoint.CALIBRATED_GATES, params['calibration_set_id']), ...
+            sample_client._api.url(APIEndpoint.CALIBRATED_GATES, params["calibration_set_id"]), ...
         ).thenReturn(dynamic_architecture_success)
     else:
         when(requests).get(dynamic_architecture_url, ...).thenReturn(dynamic_architecture_success)
 
     run_request = sample_client.create_run_request([sample_circuit], **params)
-    if 'options' in params:
-        assert run_request.active_reset_cycles == params['options'].active_reset_cycles
+    if "options" in params:
+        assert run_request.active_reset_cycles == params["options"].active_reset_cycles
     expect(requests, times=2).post(jobs_url, **post_jobs_args(run_request)).thenReturn(submit_success)
     assert sample_client.submit_run_request(run_request) == existing_run_id
     assert sample_client.submit_circuits([sample_circuit], **params) == existing_run_id
@@ -941,17 +988,17 @@ def test_create_and_submit_run_request(
 
 
 @pytest.mark.parametrize(
-    'run_request_name, quantum_architecture_name, sample_circuit_name',
+    "run_request_name, quantum_architecture_name, sample_circuit_name",
     [
         (run_request, success_result, sample_circuit)
         for run_request in [
-            'run_request_with_move_validation',
-            'run_request_without_prx_move_validation',
-            'run_request_with_move_gate_frame_tracking',
+            "run_request_with_move_validation",
+            "run_request_without_prx_move_validation",
+            "run_request_with_move_gate_frame_tracking",
         ]
         for success_result, sample_circuit in zip(
-            ['dynamic_architecture_success', 'move_architecture_success', 'move_architecture_success'],
-            ['sample_circuit', 'move_circuit', 'move_circuit_with_prx_in_the_sandwich'],
+            ["dynamic_architecture_success", "move_architecture_success", "move_architecture_success"],
+            ["sample_circuit", "move_circuit", "move_circuit_with_prx_in_the_sandwich"],
         )
     ],
 )
@@ -974,8 +1021,8 @@ def test_compiler_options_are_used_and_sent(
 
     when(requests).get(dynamic_architecture_url, ...).thenReturn(quantum_architecture_success)
     if (
-        sample_circuit_name != 'move_circuit_with_prx_in_the_sandwich'  # Valid circuit
-        or run_request_name == 'run_request_without_prx_move_validation'  # Validation is turned off
+        sample_circuit_name != "move_circuit_with_prx_in_the_sandwich"  # Valid circuit
+        or run_request_name == "run_request_without_prx_move_validation"  # Validation is turned off
     ):
         expect(requests, times=1).post(jobs_url, **post_jobs_args(run_request)).thenReturn(submit_success)
         sample_client.submit_circuits(**submit_circuits_args(run_request))
@@ -992,7 +1039,7 @@ def test_get_dynamic_quantum_architecture_with_calset_id(
 ):
     """Tests that the correct dynamic quantum architecture for the given ``calibration_set_id`` is returned."""
     calset_id = sample_dynamic_architecture.calibration_set_id
-    expect(requests, times=1).get(f'{base_url}/api/v1/calibration/{calset_id}/gates', ...).thenReturn(
+    expect(requests, times=1).get(f"{base_url}/api/v1/calibration/{calset_id}/gates", ...).thenReturn(
         dynamic_architecture_success
     )
     assert sample_client.get_dynamic_quantum_architecture(calset_id) == sample_dynamic_architecture
@@ -1008,7 +1055,7 @@ def test_get_dynamic_quantum_architecture_with_calset_id_caches(
     a given calibration set id.
     """
     calset_id = sample_dynamic_architecture.calibration_set_id
-    expect(requests, times=1).get(f'{base_url}/api/v1/calibration/{calset_id}/gates', ...).thenReturn(
+    expect(requests, times=1).get(f"{base_url}/api/v1/calibration/{calset_id}/gates", ...).thenReturn(
         dynamic_architecture_success
     )
 
@@ -1023,7 +1070,7 @@ def test_get_dynamic_quantum_architecture_without_calset_id(
     sample_client, base_url, dynamic_architecture_success, sample_dynamic_architecture
 ):
     """Tests that the correct dynamic quantum architecture for the default calibration set is returned."""
-    expect(requests, times=1).get(f'{base_url}/api/v1/calibration/default/gates', ...).thenReturn(
+    expect(requests, times=1).get(f"{base_url}/api/v1/calibration/default/gates", ...).thenReturn(
         dynamic_architecture_success
     )
     assert sample_client.get_dynamic_quantum_architecture() == sample_dynamic_architecture
@@ -1039,23 +1086,23 @@ def test_get_dynamic_quantum_architecture_without_calset_id_does_not_cache(
     changes between two invocations of get_dynamic_quantum_architecture().
     """
     dynamic_quantum_architecture_2 = {
-        'calibration_set_id': '3902d525-d8f4-42c0-9fa9-6bbd535b6c80',
-        'qubits': ['QB1', 'QB2'],
-        'computational_resonators': [],
-        'gates': {
-            'prx': {
-                'implementations': {
-                    'drag_gaussian': {
-                        'loci': [['QB1'], ['QB2']],
+        "calibration_set_id": "3902d525-d8f4-42c0-9fa9-6bbd535b6c80",
+        "qubits": ["QB1", "QB2"],
+        "computational_resonators": [],
+        "gates": {
+            "prx": {
+                "implementations": {
+                    "drag_gaussian": {
+                        "loci": [["QB1"], ["QB2"]],
                     }
                 },
-                'default_implementation': 'drag_gaussian',
-                'override_default_implementation': {},
+                "default_implementation": "drag_gaussian",
+                "override_default_implementation": {},
             },
         },
     }
     dynamic_architecture_success_2 = MockJsonResponse(200, dynamic_quantum_architecture_2)
-    expect(requests, times=2).get(f'{base_url}/api/v1/calibration/default/gates', ...).thenReturn(
+    expect(requests, times=2).get(f"{base_url}/api/v1/calibration/default/gates", ...).thenReturn(
         dynamic_architecture_success
     ).thenReturn(dynamic_architecture_success_2)
 
@@ -1068,36 +1115,21 @@ def test_get_dynamic_quantum_architecture_without_calset_id_does_not_cache(
     unstub()
 
 
-def test_get_dynamic_quantum_architecture_throws_json_decode_error_if_received_not_json(
-    sample_client, base_url, not_valid_json_response
-):
-    """Test that an exception is raised when the response is not a valid JSON"""
-    expect(requests, times=1).get(f'{base_url}/api/v1/calibration/default/gates', ...).thenReturn(
-        not_valid_json_response
-    )
-
-    with pytest.raises(ArchitectureRetrievalError):
-        sample_client.get_dynamic_quantum_architecture()
-
-    verifyNoUnwantedInteractions()
-    unstub()
-
-
 def test_get_dynamic_quantum_architecture_not_found(base_url, sample_client):
     """Test that an informative error message is returned when 404 is returned due to version incompatibility."""
-    client_version = parse(version('iqm-client'))
-    min_version = f'{client_version.major + 2}.0'
-    max_version = f'{client_version.major + 3}.0'
-    when(requests).get(f'{base_url}/info/client-libraries', headers=ANY, timeout=ANY).thenReturn(
+    client_version = parse(version("iqm-client"))
+    min_version = f"{client_version.major + 2}.0"
+    max_version = f"{client_version.major + 3}.0"
+    when(requests).get(f"{base_url}/info/client-libraries", headers=ANY, timeout=ANY).thenReturn(
         mock_supported_client_libraries_response(min_version=min_version, max_version=max_version)
     )
-    when(requests).get(f'{base_url}/api/v1/calibration/default/gates', ...).thenReturn(MockJsonResponse(404, {}))
+    when(requests).get(f"{base_url}/api/v1/calibration/default/gates", ...).thenReturn(MockJsonResponse(404, {}))
     with pytest.raises(
         HTTPError,
         match=re.escape(
-            f'Your IQM Client version {client_version} was built for a different version of IQM Server. '
-            f'You might encounter issues. For the best experience, consider using a version '
-            f'of IQM Client that satisfies {min_version} <= iqm-client < {max_version}.'
+            f"Your IQM Client version {client_version} was built for a different version of IQM Server. "
+            f"You might encounter issues. For the best experience, consider using a version "
+            f"of IQM Client that satisfies {min_version} <= iqm-client < {max_version}."
         ),
     ):
         sample_client.get_dynamic_quantum_architecture()
@@ -1105,18 +1137,18 @@ def test_get_dynamic_quantum_architecture_not_found(base_url, sample_client):
 
 
 @pytest.mark.parametrize(
-    'iqm_client_name,server_version_diff',
+    "iqm_client_name,server_version_diff",
     [
-        ('iqm_client', 0),
-        ('iqm-client', 1),
+        ("iqm_client", 0),
+        ("iqm-client", 1),
     ],
 )
 def test_check_versions_success(base_url, iqm_client_name, server_version_diff, recwarn):
     """Test that a warning about version incompatibility is shown when initializing client with incompatible server."""
-    client_version = parse(version('iqm-client'))
-    min_version = f'{client_version.major + server_version_diff}.0'
-    max_version = f'{client_version.major + server_version_diff + 1}.0'
-    when(requests).get(f'{base_url}/info/client-libraries', headers=ANY, timeout=ANY).thenReturn(
+    client_version = parse(version("iqm-client"))
+    min_version = f"{client_version.major + server_version_diff}.0"
+    max_version = f"{client_version.major + server_version_diff + 1}.0"
+    when(requests).get(f"{base_url}/info/client-libraries", headers=ANY, timeout=ANY).thenReturn(
         mock_supported_client_libraries_response(
             iqm_client_name=iqm_client_name, min_version=min_version, max_version=max_version
         )
@@ -1128,9 +1160,9 @@ def test_check_versions_success(base_url, iqm_client_name, server_version_diff, 
         with pytest.warns(
             UserWarning,
             match=re.escape(
-                f'Your IQM Client version {client_version} was built for a different version of IQM Server. '
-                f'You might encounter issues. For the best experience, consider using a version '
-                f'of IQM Client that satisfies {min_version} <= iqm-client < {max_version}.'
+                f"Your IQM Client version {client_version} was built for a different version of IQM Server. "
+                f"You might encounter issues. For the best experience, consider using a version "
+                f"of IQM Client that satisfies {min_version} <= iqm-client < {max_version}."
             ),
         ):
             IQMClient(base_url)
@@ -1139,15 +1171,15 @@ def test_check_versions_success(base_url, iqm_client_name, server_version_diff, 
 
 def test_check_versions_bad_response(base_url):
     """Test that unexpected response from /client-libraries endpoint does not break the client."""
-    when(requests).get(f'{base_url}/info/client-libraries', headers=ANY, timeout=ANY).thenReturn(
+    when(requests).get(f"{base_url}/info/client-libraries", headers=ANY, timeout=ANY).thenReturn(
         MockJsonResponse(
             200,
-            {'iqm_client': 'invalid-payload'},
+            {"iqm_client": "invalid-payload"},
         )
     )
     with pytest.warns(
         UserWarning,
-        match=re.escape('Could not verify IQM Client compatibility with the server. You might encounter issues.'),
+        match=re.escape("Could not verify IQM Client compatibility with the server. You might encounter issues."),
     ):
         IQMClient(base_url)
     unstub()
@@ -1155,12 +1187,12 @@ def test_check_versions_bad_response(base_url):
 
 def test_check_versions_request_exception(base_url):
     """Test that exception raised by request to /client-libraries endpoint does not break the client."""
-    when(requests).get(f'{base_url}/info/client-libraries', headers=ANY, timeout=ANY).thenRaise(
+    when(requests).get(f"{base_url}/info/client-libraries", headers=ANY, timeout=ANY).thenRaise(
         requests.exceptions.RequestException
     )
     with pytest.warns(
         UserWarning,
-        match=re.escape('Could not verify IQM Client compatibility with the server. You might encounter issues.'),
+        match=re.escape("Could not verify IQM Client compatibility with the server. You might encounter issues."),
     ):
         IQMClient(base_url)
     unstub()
@@ -1168,30 +1200,30 @@ def test_check_versions_request_exception(base_url):
 
 def test_get_run_counts(base_url, sample_client, existing_run_id):
     """Test that the number of runs is returned."""
-    expect(requests, times=1).get(f'{base_url}/jobs/{existing_run_id}/counts', ...).thenReturn(
+    expect(requests, times=1).get(f"{base_url}/jobs/{existing_run_id}/counts", ...).thenReturn(
         MockJsonResponse(
             200,
             {
-                'status': 'ready',
-                'counts_batch': [
+                "status": "ready",
+                "counts_batch": [
                     {
-                        'measurement_keys': ['m1'],
-                        'counts': {'0': 5, '1': 5},
+                        "measurement_keys": ["m1"],
+                        "counts": {"0": 5, "1": 5},
                     },
                     {
-                        'measurement_keys': ['m2'],
-                        'counts': {'0': 1, '1': 9},
+                        "measurement_keys": ["m2"],
+                        "counts": {"0": 1, "1": 9},
                     },
                 ],
-                'warnings': [],
+                "warnings": [],
             },
         )
     )
     counts = sample_client.get_run_counts(existing_run_id)
     assert counts.status == Status.READY
     assert counts.counts_batch == [
-        Counts(measurement_keys=['m1'], counts={'0': 5, '1': 5}),
-        Counts(measurement_keys=['m2'], counts={'0': 1, '1': 9}),
+        Counts(measurement_keys=["m1"], counts={"0": 5, "1": 5}),
+        Counts(measurement_keys=["m2"], counts={"0": 1, "1": 9}),
     ]
     verifyNoUnwantedInteractions()
     unstub()
@@ -1200,27 +1232,27 @@ def test_get_run_counts(base_url, sample_client, existing_run_id):
 def test_get_supported_client_libraries(base_url, sample_client):
     """Test retrieving client library information from server."""
     libraries_data = {
-        'iqm-client': {
-            'name': 'IQM Client',
-            'package_name': 'iqm-client',
-            'repo_url': 'https://github.com/iqm-finland/iqm-client',
-            'package_url': 'https://pypi.org/project/iqm-client',
-            'min': '14.0.0',
-            'max': '15.0.0',
-            'images': None,
+        "iqm-client": {
+            "name": "IQM Client",
+            "package_name": "iqm-client",
+            "repo_url": "",
+            "package_url": "https://pypi.org/project/iqm-client",
+            "min": "14.0.0",
+            "max": "15.0.0",
+            "images": None,
         },
-        'iqm-cortex-cli': {
-            'name': 'IQM Cortex CLI',
-            'package_name': 'iqm-cortex-cli',
-            'repo_url': 'https://github.com/iqm-finland/cortex-cli',
-            'package_url': 'https://pypi.org/project/iqm-cortex-cli',
-            'min': '1.0.0',
-            'max': '2.0.0',
-            'images': [],
+        "iqm-cortex-cli": {
+            "name": "IQM Cortex CLI",
+            "package_name": "iqm-cortex-cli",
+            "repo_url": "https://github.com/iqm-finland/cortex-cli",
+            "package_url": "https://pypi.org/project/iqm-cortex-cli",
+            "min": "1.0.0",
+            "max": "2.0.0",
+            "images": [],
         },
     }
 
-    expect(requests, times=1).get(f'{base_url}/info/client-libraries', headers=ANY, timeout=ANY).thenReturn(
+    expect(requests, times=1).get(f"{base_url}/info/client-libraries", headers=ANY, timeout=ANY).thenReturn(
         MockJsonResponse(200, libraries_data)
     )
 
@@ -1228,17 +1260,42 @@ def test_get_supported_client_libraries(base_url, sample_client):
 
     # Verify returned data matches expected structure
     assert len(libraries) == 2
-    assert 'iqm-client' in libraries
-    assert 'iqm-cortex-cli' in libraries
+    assert "iqm-client" in libraries
+    assert "iqm-cortex-cli" in libraries
 
     # Verify specific library details
-    iqm_client = libraries['iqm-client']
-    assert iqm_client.name == 'IQM Client'
-    assert iqm_client.package_name == 'iqm-client'
-    assert iqm_client.repo_url == 'https://github.com/iqm-finland/iqm-client'
-    assert iqm_client.package_url == 'https://pypi.org/project/iqm-client'
-    assert iqm_client.min == '14.0.0'
-    assert iqm_client.max == '15.0.0'
+    iqm_client = libraries["iqm-client"]
+    assert iqm_client.name == "IQM Client"
+    assert iqm_client.package_name == "iqm-client"
+    assert iqm_client.repo_url == ""
+    assert iqm_client.package_url == "https://pypi.org/project/iqm-client"
+    assert iqm_client.min == "14.0.0"
+    assert iqm_client.max == "15.0.0"
+
+    verifyNoUnwantedInteractions()
+    unstub()
+
+
+@pytest.mark.parametrize(
+    "method,url_fixture,args",
+    [
+        ("get_supported_client_libraries", "client_libraries_url", ()),
+        ("get_quantum_architecture", "quantum_architecture_url", ()),
+        ("get_quality_metric_set", "quality_metric_set_url", ()),
+        ("get_calibration_set", "calibration_set_url", ()),
+        ("get_dynamic_quantum_architecture", "dynamic_architecture_url", ()),
+        ("get_run_status", "existing_job_status_url", (uuid.UUID("3c3fcda3-e860-46bf-92a4-bcc59fa76ce9"),)),
+    ],
+)
+def test_endpoint_request_throws_error_if_received_not_json(
+    method, url_fixture, args, sample_client, not_valid_json_response, request
+):
+    """Test that an exception is raised when the response to an endpoint request is not valid JSON."""
+    url = request.getfixturevalue(url_fixture)
+    expect(requests, times=1).get(url, ...).thenReturn(not_valid_json_response)
+
+    with pytest.raises(EndpointRequestError, match="Invalid response"):
+        getattr(sample_client, method)(*args)
 
     verifyNoUnwantedInteractions()
     unstub()
@@ -1246,11 +1303,17 @@ def test_get_supported_client_libraries(base_url, sample_client):
 
 def test_check_api_version_deprecation_warning(base_url):
     """Test that deprecation warning is raised when API version is deprecated."""
+    expect(requests, times=1).get(f"{base_url}/info/client-libraries", ...).thenReturn(
+        mock_supported_client_libraries_response()
+    )
+
     with pytest.warns(
         DeprecationWarning,
         match=re.escape(
-            'The V1 API is deprecated and will be removed in a future release. Please use the V2 API instead.'
+            "The V1 API is deprecated and will be removed in a future release. Please use the V2 API instead."
         ),
     ):
         IQMClient(base_url, api_variant=APIVariant.V1)
+
+    verifyNoUnwantedInteractions()
     unstub()

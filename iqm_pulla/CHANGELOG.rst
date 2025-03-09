@@ -2,6 +2,14 @@
 Changelog
 =========
 
+Version 6.5 (2025-03-05)
+========================
+
+Features
+--------
+
+- Bump version for an updated repo organization. No functional changes. :issue:`SW-1015`
+
 Version 6.4 (2025-03-05)
 ========================
 

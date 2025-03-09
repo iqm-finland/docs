@@ -2,6 +2,19 @@
 Changelog
 =========
 
+Version 3.6 (2025-03-07)
+========================
+
+Bug fix
+-------
+
+- Fix error message formatting of server-side errors.
+
+Version 3.5 (2025-03-05)
+========================
+
+- Bump station control dependencies
+
 Version 3.4 (2025-03-05)
 ========================
 
