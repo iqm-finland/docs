@@ -13,7 +13,49 @@ interface Doc {
 }
 
 
+
+const docLinks = [
+  { href: "./iqm-pulse", title: "IQM Pulse", description: "Interface and implementations for control pulses." },
+  { href: "./iqm-pulla", title: "IQM Pulla", description: "Pulse-level access library for compiling quantum circuits." },
+  { href: "./cirq-iqm", title: "Cirq on IQM", description: "Cirq adapter for IQM’s quantum computers." },
+  { href: "./iqm-benchmarks", title: "IQM Benchmarks", description: "Quantum Characterization, Verification, and Validation (QCVV) tools for quantum computing." },
+  { href: "./iqm-client", title: "IQM Client", description: "Python client for remote access to quantum computers for circuit-level access (e.g. via Qiskit)." },
+  { href: "./iqm-station-control-client", title: "IQM Station Control Client", description: "Python client for remote access to quantum computers for pulse-level access." },
+  { href: "./iqm-exa-common", title: "IQM EXA Common", description: "Abstract interfaces, helpers, utility classes, etc." },
+  { href: "./iqm-data-definitions", title: "IQM Data Definitions", description: "A common place for data definitions shared inside IQM." },
+];
+
+
+// Helper function to parse environment variables into arrays
+const parseEnvVariable = (envVar: string | undefined): string[] => {
+  return envVar ? envVar.split(",").map((item) => item.trim()) : [];
+};
+
 function App() {
+
+  console.log(import.meta.env.VITE_SDK_PACKAGES)
+  const sdkPackages = parseEnvVariable(import.meta.env.VITE_SDK_PACKAGES);
+  const extraDocs = parseEnvVariable(import.meta.env.VITE_EXTRA_DOCS);
+
+  // Combine all package names
+  const allPackages = [...new Set([...sdkPackages, ...extraDocs])];
+
+  // Dynamically update docLinks
+  const updatedDocLinks = [...docLinks];
+
+  allPackages.forEach((pkg) => {
+    const href = `./${pkg}`;
+    const exists = updatedDocLinks.some((doc) => doc.href === href);
+
+    if (!exists) {
+      updatedDocLinks.push({
+        href,
+        title: pkg, // Use the package name as the title if missing
+        description: "", // Placeholder description
+      });
+    }
+  });
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Doc[]>(docs);
@@ -56,16 +98,6 @@ function App() {
   const [isDocumentationSelected, setIsDocumentationSelected] = useState(true);
 
 
-  const docLinks = [
-    { href: "./iqm-pulse", title: "IQM Pulse", description: "Interface and implementations for control pulses." },
-    { href: "./iqm-pulla", title: "IQM Pulla", description: "Pulse-level access library for compiling quantum circuits." },
-    { href: "./cirq-iqm/", title: "Cirq on IQM", description: "Cirq adapter for IQM’s quantum computers." },
-    { href: "./iqm-benchmarks/", title: "IQM Benchmarks", description: "Quantum Characterization, Verification, and Validation (QCVV) tools for quantum computing." },
-    { href: "./iqm-client/", title: "IQM Client", description: "Python client for remote access to quantum computers for circuit-level access (e.g. via Qiskit)." },
-    { href: "./iqm-station-control-client", title: "IQM Station Control Client", description: "Python client for remote access to quantum computers for pulse-level access." },
-    { href: "./iqm-exa-common", title: "IQM EXA Common", description: "Abstract interfaces, helpers, utility classes, etc." },
-    { href: "./iqm-data-definitions", title: "IQM Data Definitions", description: "A common place for data definitions shared inside IQM." },
-  ];
 
   return (
     <div className="min-h-screen px-8 py-3">
@@ -108,7 +140,7 @@ function App() {
                 <a href="https://resonance.meetiqm.com" target="_blank">IQM Resonance</a> and any IQM on-premise quantum computer.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
-                {docLinks.map((doc, index) => (
+                {updatedDocLinks.map((doc, index) => (
                   <a key={index} href={doc.href} target='_blank' className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow">
                     <h2 className="text-lg font-semibold text-gray-900">{doc.title}</h2>
                     <p className="mt-2 text-sm text-gray-600">{doc.description}</p>

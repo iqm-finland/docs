@@ -11,8 +11,6 @@ on:
   workflow_dispatch:
     # Allow manual triggering
 
-env:
-  PACKAGES: "iqm-pulse iqm-exa-common iqm-station-control-client iqm-pulla[qiskit,qir] iqm-benchmarks cirq-iqm iqm-client iqm-data-definitions"
 
 jobs:
   build:
@@ -21,6 +19,20 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Read package names from sdk.txt and extra_docs.txt
+        id: construct-packages
+        run: |
+          PACKAGES=$(awk '{print $1}' sdk.txt extra_docs.txt | tr '\n' ' ' | sed 's/ $//')
+          echo "packages=$PACKAGES" >> $GITHUB_OUTPUT
+
+      - name: Set PACKAGES as a global environment variable
+        run: echo "PACKAGES=${{ steps.construct-packages.outputs.packages }}" >> $GITHUB_ENV
+
+      - name: Write environment variables for React
+        working-directory: ./docs
+        run: |
+          echo "VITE_PACKAGES=${PACKAGES}" > .env
 
       - name: Install dependencies
         working-directory: ./docs
